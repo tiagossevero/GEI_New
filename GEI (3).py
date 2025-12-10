@@ -6137,49 +6137,86 @@ def menu_financeiro(engine, dados, filtros):
                     labels={'x': 'Faixa', 'y': 'Score Médio'})
         st.plotly_chart(fig)
     
-    # Análise Temporal (se disponível PGDAS)
+    # Análise Temporal (PGDAS + DIME consolidado)
     st.subheader("Evolução Temporal")
-    
+
     try:
+        # Query consolidada PGDAS + DIME
         query_temporal = """
-        SELECT 
-            gc.num_grupo,
-            SUM(pg.jan2025) as jan2025,
-            SUM(pg.fev2025) as fev2025,
-            SUM(pg.mar2025) as mar2025,
-            SUM(pg.abr2025) as abr2025,
-            SUM(pg.mai2025) as mai2025,
-            SUM(pg.jun2025) as jun2025,
-            SUM(pg.jul2025) as jul2025,
-            SUM(pg.ago2025) as ago2025,
-            SUM(pg.set2025) as set2025
-        FROM gessimples.gei_cnpj gc
-        JOIN gessimples.gei_pgdas pg ON gc.cnpj = pg.cnpj
-        GROUP BY gc.num_grupo
+        WITH pgdas_data AS (
+            SELECT
+                gc.num_grupo,
+                COALESCE(pg.jan2025, 0) as jan2025,
+                COALESCE(pg.fev2025, 0) as fev2025,
+                COALESCE(pg.mar2025, 0) as mar2025,
+                COALESCE(pg.abr2025, 0) as abr2025,
+                COALESCE(pg.mai2025, 0) as mai2025,
+                COALESCE(pg.jun2025, 0) as jun2025,
+                COALESCE(pg.jul2025, 0) as jul2025,
+                COALESCE(pg.ago2025, 0) as ago2025,
+                COALESCE(pg.set2025, 0) as set2025,
+                'PGDAS' as fonte
+            FROM gessimples.gei_cnpj gc
+            JOIN gessimples.gei_pgdas pg ON gc.cnpj = pg.cnpj
+        ),
+        dime_data AS (
+            SELECT
+                gc.num_grupo,
+                COALESCE(dm.jan2025, 0) as jan2025,
+                COALESCE(dm.fev2025, 0) as fev2025,
+                COALESCE(dm.mar2025, 0) as mar2025,
+                COALESCE(dm.abr2025, 0) as abr2025,
+                COALESCE(dm.mai2025, 0) as mai2025,
+                COALESCE(dm.jun2025, 0) as jun2025,
+                COALESCE(dm.jul2025, 0) as jul2025,
+                COALESCE(dm.ago2025, 0) as ago2025,
+                COALESCE(dm.set2025, 0) as set2025,
+                'DIME' as fonte
+            FROM gessimples.gei_cnpj gc
+            JOIN gessimples.gei_dime dm ON gc.cnpj = dm.cnpj
+        ),
+        consolidado AS (
+            SELECT * FROM pgdas_data
+            UNION ALL
+            SELECT * FROM dime_data
+        )
+        SELECT
+            num_grupo,
+            SUM(jan2025) as jan2025,
+            SUM(fev2025) as fev2025,
+            SUM(mar2025) as mar2025,
+            SUM(abr2025) as abr2025,
+            SUM(mai2025) as mai2025,
+            SUM(jun2025) as jun2025,
+            SUM(jul2025) as jul2025,
+            SUM(ago2025) as ago2025,
+            SUM(set2025) as set2025
+        FROM consolidado
+        GROUP BY num_grupo
         LIMIT 20
         """
         df_temp = pd.read_sql(query_temporal, engine)
-        
+
         if not df_temp.empty:
             # Pegar top 10 grupos por receita total
             df_temp['total'] = df_temp[[c for c in df_temp.columns if c != 'num_grupo']].sum(axis=1)
             df_temp = df_temp.nlargest(10, 'total')
-            
+
             # Transformar para formato long
-            meses = ['jan2025', 'fev2025', 'mar2025', 'abr2025', 'mai2025', 
+            meses = ['jan2025', 'fev2025', 'mar2025', 'abr2025', 'mai2025',
                     'jun2025', 'jul2025', 'ago2025', 'set2025']
-            
-            df_long = df_temp.melt(id_vars=['num_grupo'], 
+
+            df_long = df_temp.melt(id_vars=['num_grupo'],
                                   value_vars=meses,
-                                  var_name='mes', 
+                                  var_name='mes',
                                   value_name='receita')
-            
+
             fig = px.line(df_long, x='mes', y='receita', color='num_grupo',
-                         title="Evolução de Receita - Top 10 Grupos (2025)",
+                         title="Evolução de Receita - Top 10 Grupos (PGDAS + DIME, 2025)",
                          template=filtros['tema'])
             st.plotly_chart(fig)
-    except:
-        st.info("Dados temporais não disponíveis")
+    except Exception as e:
+        st.info(f"Dados temporais não disponíveis: {e}")
     
     # Top Grupos Financeiros
     st.subheader("Top 30 Grupos por Receita")
