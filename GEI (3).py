@@ -1777,10 +1777,20 @@ def gerar_pdf_analise_pontual(cnpjs_validos, resultados):
     if len(resultados.get('socios_compartilhados', pd.Series())) > 0:
         alertas.append("CRÍTICO: Sócios compartilhados detectados - possível grupo econômico")
     
-    if not resultados.get('pgdas', pd.DataFrame()).empty:
-        receitas_altas = resultados['pgdas'][resultados['pgdas']['receita_12m'] > 4800000]
-        if not receitas_altas.empty:
-            alertas.append(f"ATENÇÃO: {len(receitas_altas)} CNPJs com receita acima do limite SN")
+    # Verificar receitas altas (PGDAS + DIME)
+    tem_pgdas_alerta = not resultados.get('pgdas', pd.DataFrame()).empty
+    tem_dime_alerta = not resultados.get('dime', pd.DataFrame()).empty
+
+    cnpjs_acima_limite = set()
+    if tem_pgdas_alerta:
+        receitas_altas_pgdas = resultados['pgdas'][resultados['pgdas']['receita_12m'] > 4800000]
+        cnpjs_acima_limite.update(receitas_altas_pgdas['cnpj'].unique())
+    if tem_dime_alerta:
+        receitas_altas_dime = resultados['dime'][resultados['dime']['receita_12m'] > 4800000]
+        cnpjs_acima_limite.update(receitas_altas_dime['cnpj'].unique())
+
+    if cnpjs_acima_limite:
+        alertas.append(f"ATENÇÃO: {len(cnpjs_acima_limite)} CNPJs com faturamento acima do limite SN (PGDAS/DIME)")
     
     if not resultados.get('indicios', pd.DataFrame()).empty:
         alertas.append(f"CRÍTICO: {len(resultados['indicios'])} indícios fiscais identificados")
@@ -1941,41 +1951,72 @@ def gerar_pdf_analise_pontual(cnpjs_validos, resultados):
         story.append(table)
         story.append(Spacer(1, 0.2*inch))
     
-    # 3.3 - RECEITAS (PGDAS)
-    story.append(Paragraph("<b>3.3. Análise de Receitas</b>", styles['Heading3']))
-    
-    if not resultados['pgdas'].empty and len(cnpjs_validos) > 1:
+    # 3.3 - FATURAMENTO (PGDAS + DIME)
+    story.append(Paragraph("<b>3.3. Análise de Faturamento (PGDAS / DIME)</b>", styles['Heading3']))
+
+    # Consolidar dados de faturamento
+    tem_pgdas_pdf = not resultados.get('pgdas', pd.DataFrame()).empty
+    tem_dime_pdf = not resultados.get('dime', pd.DataFrame()).empty
+
+    if (tem_pgdas_pdf or tem_dime_pdf) and len(cnpjs_validos) > 1:
         receitas_dados = []
-        
-        max_score_possivel += 5
-        receitas_por_cnpj = resultados['pgdas'].groupby('cnpj')['receita_12m'].max()
+
+        # Calcular receitas consolidadas
+        receitas_pgdas = resultados['pgdas'].groupby('cnpj')['receita_12m'].max() if tem_pgdas_pdf else pd.Series(dtype=float)
+        receitas_dime = resultados['dime'].groupby('cnpj')['receita_12m'].max() if tem_dime_pdf else pd.Series(dtype=float)
+
+        # Combinar receitas (soma de PGDAS e DIME por CNPJ único)
+        todos_cnpjs = set(receitas_pgdas.index.tolist()) | set(receitas_dime.index.tolist())
+        receitas_por_cnpj = pd.Series(dtype=float)
+        for cnpj in todos_cnpjs:
+            valor_pgdas = receitas_pgdas.get(cnpj, 0)
+            valor_dime = receitas_dime.get(cnpj, 0)
+            receitas_por_cnpj[cnpj] = max(valor_pgdas, valor_dime)  # Usar o maior valor para evitar duplicação
+
         receita_total_grupo = receitas_por_cnpj.sum()
-        
+
+        # Info sobre fontes
+        fontes_str = []
+        if tem_pgdas_pdf:
+            fontes_str.append(f"PGDAS: {len(receitas_pgdas)} CNPJs")
+        if tem_dime_pdf:
+            fontes_str.append(f"DIME: {len(receitas_dime)} CNPJs")
+        story.append(Paragraph(f"Fontes: {', '.join(fontes_str)}", styles['Normal']))
+        story.append(Spacer(1, 0.1*inch))
+
+        max_score_possivel += 5
         if receita_total_grupo > 4800000:
             excesso = receita_total_grupo - 4800000
-            receitas_dados.append(['Receita Total', formatar_moeda(receita_total_grupo),
+            receitas_dados.append(['Faturamento Total', formatar_moeda(receita_total_grupo),
                                    'ACIMA LIMITE', formatar_moeda(excesso), '+5.0', 'CRÍTICO'])
             evidencias_pdf['receita_excesso'] = True
             score_similaridade += 5
         else:
-            receitas_dados.append(['Receita Total', formatar_moeda(receita_total_grupo),
+            receitas_dados.append(['Faturamento Total', formatar_moeda(receita_total_grupo),
                                    'DENTRO LIMITE', '-', '0.0', '-'])
-        
+
         # Distribuição uniforme
         max_score_possivel += 2
-        receita_media = receitas_por_cnpj.mean()
-        desvio_padrao = receitas_por_cnpj.std()
-        coef_variacao = (desvio_padrao / receita_media) if receita_media > 0 else 0
-        
-        if coef_variacao < 0.3 and len(receitas_por_cnpj) > 1:
-            receitas_dados.append(['Distribuição', f'CV: {coef_variacao:.2f}',
-                                   'MUITO UNIFORME', '-', '+2.0', 'Planejada'])
-            evidencias_pdf['receita_uniforme'] = True
-            score_similaridade += 2
-        else:
-            receitas_dados.append(['Distribuição', f'CV: {coef_variacao:.2f}',
-                                   'VARIADA', '-', '0.0', '-'])
-        
+        if len(receitas_por_cnpj) > 1:
+            receita_media = receitas_por_cnpj.mean()
+            desvio_padrao = receitas_por_cnpj.std()
+            coef_variacao = (desvio_padrao / receita_media) if receita_media > 0 else 0
+
+            if coef_variacao < 0.3:
+                receitas_dados.append(['Distribuição', f'CV: {coef_variacao:.2f}',
+                                       'MUITO UNIFORME', '-', '+2.0', 'Planejada'])
+                evidencias_pdf['receita_uniforme'] = True
+                score_similaridade += 2
+            else:
+                receitas_dados.append(['Distribuição', f'CV: {coef_variacao:.2f}',
+                                       'VARIADA', '-', '0.0', '-'])
+
+        # Análise de regimes mistos
+        if tem_pgdas_pdf and tem_dime_pdf:
+            receitas_dados.append(['Regimes Tributários', 'Misto (SN + Normal)',
+                                   'ATENÇÃO', '-', '+1.0', 'Planejamento'])
+            score_similaridade += 1
+
         table = Table([['Indicador', 'Valor', 'Status', 'Detalhe', 'Pontos', 'Nível']] + receitas_dados,
                      colWidths=[1.2*inch, 1.3*inch, 1.2*inch, 1*inch, 0.6*inch, 0.7*inch])
         table.setStyle(TableStyle([
@@ -2312,30 +2353,111 @@ def gerar_pdf_analise_pontual(cnpjs_validos, resultados):
         story.append(table)
         story.append(PageBreak())
     
-    # SEÇÃO 5: RECEITAS (PGDAS)
-    if not resultados.get('pgdas', pd.DataFrame()).empty:
-        story.append(Paragraph("<b>5. RECEITAS DECLARADAS (PGDAS)</b>", styles['Heading2']))
-        
-        receita_max = resultados['pgdas'].groupby('cnpj')['receita_12m'].max().reset_index()
-        
-        dados_receita = [['CNPJ', 'Receita Máxima (12m)', 'Acima Limite SN']]
-        for _, row in receita_max.iterrows():
-            receita = row['receita_12m']
-            dados_receita.append([
-                str(row['cnpj']),
-                formatar_moeda(receita),
-                'SIM' if receita > 4800000 else 'NÃO'
-            ])
-        
-        table = Table(dados_receita, colWidths=[2*inch, 2.5*inch, 1.5*inch])
-        table.setStyle(TableStyle([
+    # SEÇÃO 5: FATURAMENTO DECLARADO (PGDAS + DIME)
+    tem_pgdas = not resultados.get('pgdas', pd.DataFrame()).empty
+    tem_dime = not resultados.get('dime', pd.DataFrame()).empty
+    tem_faturamento = not resultados.get('faturamento', pd.DataFrame()).empty
+
+    if tem_pgdas or tem_dime or tem_faturamento:
+        story.append(Paragraph("<b>5. FATURAMENTO DECLARADO (PGDAS / DIME)</b>", styles['Heading2']))
+
+        # 5.1 PGDAS (Simples Nacional)
+        if tem_pgdas:
+            story.append(Paragraph("<b>5.1 PGDAS - Simples Nacional</b>", styles['Heading3']))
+
+            receita_max_pgdas = resultados['pgdas'].groupby('cnpj')['receita_12m'].max().reset_index()
+
+            dados_pgdas = [['CNPJ', 'Receita Máxima (12m)', 'Acima Limite SN']]
+            for _, row in receita_max_pgdas.iterrows():
+                receita = row['receita_12m']
+                dados_pgdas.append([
+                    str(row['cnpj']),
+                    formatar_moeda(receita),
+                    'SIM' if receita > 4800000 else 'NÃO'
+                ])
+
+            table_pgdas = Table(dados_pgdas, colWidths=[2*inch, 2.5*inch, 1.5*inch])
+            table_pgdas.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4CAF50')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(table_pgdas)
+            story.append(Spacer(1, 0.2*inch))
+
+        # 5.2 DIME (Regime Normal)
+        if tem_dime:
+            story.append(Paragraph("<b>5.2 DIME - Regime Normal</b>", styles['Heading3']))
+
+            df_dime = resultados['dime']
+            receita_max_dime = df_dime.groupby('cnpj')['receita_12m'].max().reset_index()
+
+            dados_dime = [['CNPJ', 'Faturamento Máximo (12m)', 'Total Créditos', 'Total Débitos']]
+            for _, row in receita_max_dime.iterrows():
+                cnpj = str(row['cnpj'])
+                faturamento = row['receita_12m']
+                # Buscar totais do CNPJ
+                dados_cnpj = df_dime[df_dime['cnpj'] == cnpj]
+                total_creditos = dados_cnpj['total_creditos'].sum() if 'total_creditos' in dados_cnpj.columns else 0
+                total_debitos = dados_cnpj['total_debitos'].sum() if 'total_debitos' in dados_cnpj.columns else 0
+                dados_dime.append([
+                    cnpj,
+                    formatar_moeda(faturamento),
+                    formatar_moeda(total_creditos),
+                    formatar_moeda(total_debitos)
+                ])
+
+            table_dime = Table(dados_dime, colWidths=[1.8*inch, 1.8*inch, 1.5*inch, 1.5*inch])
+            table_dime.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2196F3')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(table_dime)
+            story.append(Spacer(1, 0.2*inch))
+
+        # 5.3 Resumo Consolidado
+        story.append(Paragraph("<b>5.3 Resumo Consolidado do Grupo</b>", styles['Heading3']))
+
+        # Calcular totais
+        receita_total_pgdas = resultados['pgdas'].groupby('cnpj')['receita_12m'].max().sum() if tem_pgdas else 0
+        receita_total_dime = resultados['dime'].groupby('cnpj')['receita_12m'].max().sum() if tem_dime else 0
+        receita_total_grupo = receita_total_pgdas + receita_total_dime
+
+        dados_resumo = [
+            ['Fonte', 'Qtd CNPJs', 'Faturamento Total'],
+            ['PGDAS (Simples)', str(len(resultados['pgdas']['cnpj'].unique())) if tem_pgdas else '0', formatar_moeda(receita_total_pgdas)],
+            ['DIME (Normal)', str(len(resultados['dime']['cnpj'].unique())) if tem_dime else '0', formatar_moeda(receita_total_dime)],
+            ['TOTAL GRUPO', '-', formatar_moeda(receita_total_grupo)]
+        ]
+
+        table_resumo = Table(dados_resumo, colWidths=[2.5*inch, 1.5*inch, 2.5*inch])
+        table_resumo.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#FFE0E0')),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
-        story.append(table)
+        story.append(table_resumo)
+
+        # Alerta se ultrapassar limite
+        if receita_total_grupo > 4800000:
+            excesso = receita_total_grupo - 4800000
+            story.append(Spacer(1, 0.1*inch))
+            alerta_style = ParagraphStyle('Alerta', parent=styles['Normal'], textColor=colors.red, fontSize=10)
+            story.append(Paragraph(
+                f"<b>ALERTA: Faturamento total do grupo ({formatar_moeda(receita_total_grupo)}) excede o limite do Simples Nacional em {formatar_moeda(excesso)}</b>",
+                alerta_style
+            ))
+
         story.append(PageBreak())
     
     # SEÇÃO 6: INDÍCIOS FISCAIS
@@ -2901,7 +3023,127 @@ def analise_pontual(engine, dados, filtros):
             except Exception as e:
                 st.warning(f"Erro ao buscar PGDAS: {e}")
                 st.session_state.analise_resultados['pgdas'] = pd.DataFrame()
-            
+
+            # 3.5. DIME (Regime Normal)
+            try:
+                status_text.text("3.5/10 - Verificando receitas declaradas (DIME - Regime Normal)...")
+                progress_bar.progress(35)
+
+                query_dime = f"""
+                WITH base AS (
+                    SELECT
+                        REGEXP_REPLACE(TRIM(CAST(NU_CNPJ AS STRING)), '[^0-9]', '') AS nu_cnpj,
+                        nu_per_ref,
+                        COALESCE(VL_FATURAMENTO, 0) AS vl_faturamento,
+                        COALESCE(VL_RECEITA_BRUTA, 0) AS vl_receita_bruta,
+                        COALESCE(VL_TOT_CRED, 0) AS vl_tot_cred,
+                        COALESCE(VL_TOT_DEB, 0) AS vl_tot_deb,
+                        COALESCE(VL_DEB_RECOLHER, 0) AS vl_deb_recolher,
+                        sn_com_movimento
+                    FROM usr_sat_ods.ods_decl_dime_raw
+                    WHERE REGEXP_REPLACE(TRIM(CAST(NU_CNPJ AS STRING)), '[^0-9]', '') IN ('{cnpjs_str}')
+                    AND sn_cancelada = 0
+                    AND nu_per_ref BETWEEN 202001 AND 202509
+                ),
+                receitas_12m AS (
+                    SELECT
+                        nu_cnpj,
+                        nu_per_ref,
+                        vl_faturamento,
+                        vl_receita_bruta,
+                        vl_tot_cred,
+                        vl_tot_deb,
+                        vl_deb_recolher,
+                        sn_com_movimento,
+                        SUM(vl_faturamento) OVER (
+                            PARTITION BY nu_cnpj
+                            ORDER BY nu_per_ref
+                            ROWS BETWEEN 11 PRECEDING AND CURRENT ROW
+                        ) AS vl_faturamento_12m
+                    FROM base
+                )
+                SELECT
+                    nu_cnpj AS cnpj,
+                    nu_per_ref AS periodo,
+                    vl_faturamento AS faturamento_mensal,
+                    vl_receita_bruta AS receita_bruta_mensal,
+                    vl_faturamento_12m AS receita_12m,
+                    vl_tot_cred AS total_creditos,
+                    vl_tot_deb AS total_debitos,
+                    vl_deb_recolher AS debito_recolher,
+                    sn_com_movimento AS com_movimento,
+                    CASE
+                        WHEN vl_faturamento = 0 THEN 'SEM MOVIMENTO'
+                        WHEN vl_tot_cred = 0 AND vl_tot_deb = 0 THEN 'ZERADA'
+                        ELSE 'NORMAL'
+                    END AS situacao_declaracao
+                FROM receitas_12m
+                WHERE vl_faturamento_12m IS NOT NULL
+                ORDER BY nu_cnpj, nu_per_ref DESC
+                """
+                st.session_state.analise_resultados['dime'] = pd.read_sql(query_dime, engine)
+            except Exception as e:
+                st.warning(f"Erro ao buscar DIME: {e}")
+                st.session_state.analise_resultados['dime'] = pd.DataFrame()
+
+            # 3.6. Consolidar Faturamento (PGDAS + DIME)
+            try:
+                df_pgdas = st.session_state.analise_resultados.get('pgdas', pd.DataFrame())
+                df_dime = st.session_state.analise_resultados.get('dime', pd.DataFrame())
+                df_cadastro = st.session_state.analise_resultados.get('cadastro', pd.DataFrame())
+
+                # Identificar regime de cada CNPJ pelo cadastro
+                regimes_por_cnpj = {}
+                if not df_cadastro.empty and 'nm_reg_apuracao' in df_cadastro.columns:
+                    for _, row in df_cadastro.iterrows():
+                        cnpj = str(row.get('cnpj', '')).replace('.', '').replace('/', '').replace('-', '')
+                        regime = str(row.get('nm_reg_apuracao', '')).upper()
+                        # Simples Nacional usa PGDAS, Regime Normal usa DIME
+                        if 'SIMPLES' in regime or 'SN' in regime:
+                            regimes_por_cnpj[cnpj] = 'PGDAS'
+                        else:
+                            regimes_por_cnpj[cnpj] = 'DIME'
+
+                # Consolidar faturamento
+                faturamento_consolidado = []
+
+                # Adicionar dados do PGDAS (para empresas do Simples)
+                if not df_pgdas.empty:
+                    for _, row in df_pgdas.iterrows():
+                        cnpj = str(row['cnpj']).replace('.', '').replace('/', '').replace('-', '')
+                        faturamento_consolidado.append({
+                            'cnpj': cnpj,
+                            'periodo': row['periodo'],
+                            'receita_12m': row['receita_12m'],
+                            'fonte': 'PGDAS',
+                            'regime': 'Simples Nacional'
+                        })
+
+                # Adicionar dados da DIME (para empresas do Regime Normal)
+                if not df_dime.empty:
+                    for _, row in df_dime.iterrows():
+                        cnpj = str(row['cnpj']).replace('.', '').replace('/', '').replace('-', '')
+                        faturamento_consolidado.append({
+                            'cnpj': cnpj,
+                            'periodo': row['periodo'],
+                            'receita_12m': row['receita_12m'],
+                            'faturamento_mensal': row.get('faturamento_mensal', 0),
+                            'receita_bruta_mensal': row.get('receita_bruta_mensal', 0),
+                            'total_creditos': row.get('total_creditos', 0),
+                            'total_debitos': row.get('total_debitos', 0),
+                            'fonte': 'DIME',
+                            'regime': 'Regime Normal'
+                        })
+
+                if faturamento_consolidado:
+                    st.session_state.analise_resultados['faturamento'] = pd.DataFrame(faturamento_consolidado)
+                else:
+                    st.session_state.analise_resultados['faturamento'] = pd.DataFrame()
+
+            except Exception as e:
+                st.warning(f"Erro ao consolidar faturamento: {e}")
+                st.session_state.analise_resultados['faturamento'] = pd.DataFrame()
+
             # 4. NFE
             try:
                 status_text.text("4/10 - Analisando notas fiscais (NFe/NFCe)...")
@@ -3151,7 +3393,7 @@ def analise_pontual(engine, dados, filtros):
         tabs = st.tabs([
             "Cadastro",
             "Sócios",
-            "Receitas (PGDAS)",
+            "Faturamento (PGDAS/DIME)",
             "Notas Fiscais",
             "C115",
             "Contas (CCS)",
@@ -3189,28 +3431,135 @@ def analise_pontual(engine, dados, filtros):
             else:
                 st.info("Nenhum vínculo societário encontrado.")
         
-        # TAB 3: PGDAS
+        # TAB 3: FATURAMENTO (PGDAS + DIME)
         with tabs[2]:
-            if not resultados['pgdas'].empty:
-                st.subheader("Receitas Declaradas (PGDAS)")
-                
-                receita_max = resultados['pgdas'].groupby('cnpj')['receita_12m'].max().reset_index()
-                receita_max.columns = ['CNPJ', 'Receita_Maxima_12m']
-                receita_max['Acima_Limite_SN'] = receita_max['Receita_Maxima_12m'] > 4800000
-                receita_max['Receita_Maxima_12m'] = receita_max['Receita_Maxima_12m'].apply(formatar_moeda)
-                
-                st.write("**Receita Máxima por CNPJ:**")
-                st.dataframe(receita_max, width='stretch', hide_index=True)
-                
-                fig = px.line(resultados['pgdas'], x='periodo', y='receita_12m', color='cnpj',
-                             title="Evolução da Receita (12 meses)",
-                             template=filtros['tema'])
-                st.plotly_chart(fig, use_container_width=True)
-                
-                st.write("**Dados Completos:**")
-                st.dataframe(resultados['pgdas'], width='stretch', hide_index=True)
+            # Verificar se há dados em qualquer uma das fontes
+            tem_pgdas = not resultados['pgdas'].empty
+            tem_dime = not resultados.get('dime', pd.DataFrame()).empty
+            tem_faturamento = not resultados.get('faturamento', pd.DataFrame()).empty
+
+            if tem_pgdas or tem_dime or tem_faturamento:
+                st.subheader("Faturamento Declarado (PGDAS / DIME)")
+
+                # Métricas resumidas
+                col_m1, col_m2, col_m3 = st.columns(3)
+                with col_m1:
+                    qtd_pgdas = len(resultados['pgdas']['cnpj'].unique()) if tem_pgdas else 0
+                    st.metric("Empresas PGDAS (Simples)", qtd_pgdas)
+                with col_m2:
+                    qtd_dime = len(resultados.get('dime', pd.DataFrame())['cnpj'].unique()) if tem_dime else 0
+                    st.metric("Empresas DIME (Normal)", qtd_dime)
+                with col_m3:
+                    st.metric("Total de Fontes", (1 if tem_pgdas else 0) + (1 if tem_dime else 0))
+
+                # Sub-tabs para separar PGDAS, DIME e Consolidado
+                sub_tabs = st.tabs(["Consolidado", "PGDAS (Simples Nacional)", "DIME (Regime Normal)"])
+
+                # SUB-TAB: CONSOLIDADO
+                with sub_tabs[0]:
+                    if tem_faturamento:
+                        df_fat = resultados['faturamento']
+                        st.write("**Visão Consolidada - Receita por CNPJ e Fonte:**")
+
+                        # Receita máxima por CNPJ consolidada
+                        receita_consolidada = df_fat.groupby(['cnpj', 'fonte', 'regime'])['receita_12m'].max().reset_index()
+                        receita_consolidada.columns = ['CNPJ', 'Fonte', 'Regime', 'Receita_Maxima_12m']
+                        receita_consolidada['Acima_Limite_SN'] = receita_consolidada['Receita_Maxima_12m'] > 4800000
+                        receita_consolidada['Receita_Maxima_12m_Fmt'] = receita_consolidada['Receita_Maxima_12m'].apply(formatar_moeda)
+
+                        st.dataframe(receita_consolidada[['CNPJ', 'Fonte', 'Regime', 'Receita_Maxima_12m_Fmt', 'Acima_Limite_SN']],
+                                   width='stretch', hide_index=True)
+
+                        # Receita total do grupo (somando todas as empresas)
+                        receita_total_grupo = receita_consolidada['Receita_Maxima_12m'].sum()
+                        st.info(f"**Receita Total do Grupo (soma de todas as empresas):** {formatar_moeda(receita_total_grupo)}")
+
+                        if receita_total_grupo > 4800000:
+                            excesso = receita_total_grupo - 4800000
+                            st.error(f"⚠️ **ALERTA:** Receita total do grupo ({formatar_moeda(receita_total_grupo)}) excede o limite do Simples Nacional em {formatar_moeda(excesso)}")
+
+                        # Gráfico de evolução consolidada
+                        fig_consolidado = px.line(
+                            df_fat,
+                            x='periodo',
+                            y='receita_12m',
+                            color='cnpj',
+                            line_dash='fonte',
+                            title="Evolução da Receita (12 meses) - Todas as Fontes",
+                            labels={'receita_12m': 'Receita (R$)', 'periodo': 'Período', 'fonte': 'Fonte'},
+                            template=filtros['tema']
+                        )
+                        fig_consolidado.add_hline(y=4800000, line_dash="dash", line_color="red",
+                                                annotation_text="Limite SN (R$ 4,8M)")
+                        st.plotly_chart(fig_consolidado, use_container_width=True)
+                    else:
+                        st.info("Dados consolidados não disponíveis.")
+
+                # SUB-TAB: PGDAS
+                with sub_tabs[1]:
+                    if tem_pgdas:
+                        st.write("**Receitas Declaradas via PGDAS (Simples Nacional):**")
+
+                        receita_max_pgdas = resultados['pgdas'].groupby('cnpj')['receita_12m'].max().reset_index()
+                        receita_max_pgdas.columns = ['CNPJ', 'Receita_Maxima_12m']
+                        receita_max_pgdas['Acima_Limite_SN'] = receita_max_pgdas['Receita_Maxima_12m'] > 4800000
+                        receita_max_pgdas['Receita_Maxima_12m'] = receita_max_pgdas['Receita_Maxima_12m'].apply(formatar_moeda)
+
+                        st.dataframe(receita_max_pgdas, width='stretch', hide_index=True)
+
+                        fig_pgdas = px.line(resultados['pgdas'], x='periodo', y='receita_12m', color='cnpj',
+                                          title="Evolução da Receita PGDAS (12 meses)",
+                                          template=filtros['tema'])
+                        fig_pgdas.add_hline(y=4800000, line_dash="dash", line_color="red",
+                                          annotation_text="Limite SN")
+                        st.plotly_chart(fig_pgdas, use_container_width=True)
+
+                        st.write("**Dados Completos PGDAS:**")
+                        st.dataframe(resultados['pgdas'], width='stretch', hide_index=True)
+                    else:
+                        st.info("Nenhuma declaração PGDAS encontrada para os CNPJs informados.")
+
+                # SUB-TAB: DIME
+                with sub_tabs[2]:
+                    if tem_dime:
+                        df_dime = resultados['dime']
+                        st.write("**Receitas Declaradas via DIME (Regime Normal):**")
+
+                        receita_max_dime = df_dime.groupby('cnpj')['receita_12m'].max().reset_index()
+                        receita_max_dime.columns = ['CNPJ', 'Faturamento_Maximo_12m']
+                        receita_max_dime['Faturamento_Maximo_12m_Fmt'] = receita_max_dime['Faturamento_Maximo_12m'].apply(formatar_moeda)
+
+                        st.dataframe(receita_max_dime[['CNPJ', 'Faturamento_Maximo_12m_Fmt']], width='stretch', hide_index=True)
+
+                        # Métricas adicionais da DIME
+                        col_d1, col_d2, col_d3 = st.columns(3)
+                        with col_d1:
+                            total_creditos = df_dime['total_creditos'].sum() if 'total_creditos' in df_dime.columns else 0
+                            st.metric("Total Créditos ICMS", formatar_moeda(total_creditos))
+                        with col_d2:
+                            total_debitos = df_dime['total_debitos'].sum() if 'total_debitos' in df_dime.columns else 0
+                            st.metric("Total Débitos ICMS", formatar_moeda(total_debitos))
+                        with col_d3:
+                            debito_recolher = df_dime['debito_recolher'].sum() if 'debito_recolher' in df_dime.columns else 0
+                            st.metric("Débito a Recolher", formatar_moeda(debito_recolher))
+
+                        fig_dime = px.line(df_dime, x='periodo', y='receita_12m', color='cnpj',
+                                          title="Evolução do Faturamento DIME (12 meses)",
+                                          template=filtros['tema'])
+                        st.plotly_chart(fig_dime, use_container_width=True)
+
+                        # Situação das declarações
+                        if 'situacao_declaracao' in df_dime.columns:
+                            st.write("**Situação das Declarações DIME:**")
+                            situacao_resumo = df_dime.groupby(['cnpj', 'situacao_declaracao']).size().reset_index(name='qtd')
+                            st.dataframe(situacao_resumo, width='stretch', hide_index=True)
+
+                        st.write("**Dados Completos DIME:**")
+                        st.dataframe(df_dime, width='stretch', hide_index=True)
+                    else:
+                        st.info("Nenhuma declaração DIME encontrada para os CNPJs informados.")
             else:
-                st.info("Nenhuma declaração PGDAS encontrada.")
+                st.info("Nenhuma declaração de faturamento encontrada (PGDAS ou DIME).")
         
         # TAB 4: NFE
         with tabs[3]:
@@ -3366,10 +3715,17 @@ def analise_pontual(engine, dados, filtros):
         if len(resultados['socios_compartilhados']) > 0:
             alertas.append(f"🔴 **CRÍTICO**: {len(resultados['socios_compartilhados'])} sócios compartilhados entre os CNPJs analisados, indicando possível grupo econômico.")
         
+        # Verificar faturamento alto (PGDAS + DIME)
+        cnpjs_faturamento_alto = set()
         if not resultados['pgdas'].empty:
-            receitas_altas = resultados['pgdas'][resultados['pgdas']['receita_12m'] > 4800000]['cnpj'].nunique()
-            if receitas_altas > 0:
-                alertas.append(f"🟡 **ATENÇÃO**: {receitas_altas} CNPJs com receita acima do limite do Simples Nacional.")
+            cnpjs_pgdas_alto = resultados['pgdas'][resultados['pgdas']['receita_12m'] > 4800000]['cnpj'].unique()
+            cnpjs_faturamento_alto.update(cnpjs_pgdas_alto)
+        if not resultados.get('dime', pd.DataFrame()).empty:
+            cnpjs_dime_alto = resultados['dime'][resultados['dime']['receita_12m'] > 4800000]['cnpj'].unique()
+            cnpjs_faturamento_alto.update(cnpjs_dime_alto)
+
+        if len(cnpjs_faturamento_alto) > 0:
+            alertas.append(f"🟡 **ATENÇÃO**: {len(cnpjs_faturamento_alto)} CNPJs com faturamento acima do limite do Simples Nacional (PGDAS/DIME).")
         
         if not resultados['ccs'].empty:
             cpfs_contas = resultados['ccs'].groupby('nr_cpf')['cnpj'].nunique()
@@ -3690,20 +4046,65 @@ def analise_pontual(engine, dados, filtros):
                 st.warning("Dados de vínculos societários insuficientes")
         
         # ===================================================================
-        # TAB 3: ANÁLISE DE RECEITAS (PGDAS)
+        # TAB 3: ANÁLISE DE RECEITAS (PGDAS + DIME)
         # ===================================================================
         with tabs_similaridade[2]:
-            st.subheader("Análise de Receitas - PGDAS")
-            
-            if not resultados['pgdas'].empty and len(cnpjs_validos) > 1:
+            st.subheader("Análise de Faturamento - PGDAS / DIME")
+
+            # Verificar disponibilidade de dados de faturamento
+            tem_pgdas = not resultados['pgdas'].empty
+            tem_dime = not resultados.get('dime', pd.DataFrame()).empty
+            tem_faturamento = not resultados.get('faturamento', pd.DataFrame()).empty
+
+            # Consolidar dados para análise
+            if tem_faturamento:
+                df_analise = resultados['faturamento'].copy()
+            elif tem_pgdas or tem_dime:
+                # Fallback: criar dataframe consolidado manualmente
+                dados_consolidados = []
+                if tem_pgdas:
+                    for _, row in resultados['pgdas'].iterrows():
+                        dados_consolidados.append({
+                            'cnpj': str(row['cnpj']),
+                            'periodo': row['periodo'],
+                            'receita_12m': row['receita_12m'],
+                            'fonte': 'PGDAS'
+                        })
+                if tem_dime:
+                    for _, row in resultados['dime'].iterrows():
+                        dados_consolidados.append({
+                            'cnpj': str(row['cnpj']),
+                            'periodo': row['periodo'],
+                            'receita_12m': row['receita_12m'],
+                            'fonte': 'DIME'
+                        })
+                df_analise = pd.DataFrame(dados_consolidados) if dados_consolidados else pd.DataFrame()
+            else:
+                df_analise = pd.DataFrame()
+
+            if not df_analise.empty and len(cnpjs_validos) > 1:
                 receitas_checks = []
-                
+
+                # Informação sobre fontes de dados
+                fontes_disponiveis = df_analise['fonte'].unique().tolist() if 'fonte' in df_analise.columns else ['PGDAS']
+                st.info(f"**Fontes de dados utilizadas:** {', '.join(fontes_disponiveis)}")
+
+                # Mostrar contagem por fonte
+                if 'fonte' in df_analise.columns:
+                    col_f1, col_f2 = st.columns(2)
+                    with col_f1:
+                        cnpjs_pgdas = df_analise[df_analise['fonte'] == 'PGDAS']['cnpj'].nunique() if 'PGDAS' in fontes_disponiveis else 0
+                        st.metric("CNPJs com PGDAS (Simples)", cnpjs_pgdas)
+                    with col_f2:
+                        cnpjs_dime = df_analise[df_analise['fonte'] == 'DIME']['cnpj'].nunique() if 'DIME' in fontes_disponiveis else 0
+                        st.metric("CNPJs com DIME (Normal)", cnpjs_dime)
+
                 # Receita somada ultrapassa limite
                 max_score_possivel += 5
-                receitas_por_cnpj = resultados['pgdas'].groupby('cnpj')['receita_12m'].max()
+                receitas_por_cnpj = df_analise.groupby('cnpj')['receita_12m'].max()
                 receita_total_grupo = receitas_por_cnpj.sum()
                 receita_media = receitas_por_cnpj.mean()
-                
+
                 if receita_total_grupo > 4800000:
                     excesso = receita_total_grupo - 4800000
                     pontos_receita = 5
@@ -3717,14 +4118,14 @@ def analise_pontual(engine, dados, filtros):
                     })
                     evidencias['receita_excesso'] = True
                     score_similaridade += pontos_receita
-                    
+
                     st.error(f"""
                     **🔴 ALERTA CRÍTICO - LIMITE ULTRAPASSADO**
-                    
-                    Receita somada: **{formatar_moeda(receita_total_grupo)}**
-                    
+
+                    Receita somada (PGDAS + DIME): **{formatar_moeda(receita_total_grupo)}**
+
                     Excesso: **{formatar_moeda(excesso)}** ({((excesso/4800000)*100):.1f}% acima do limite)
-                    
+
                     Este é um forte indício de fracionamento para manutenção artificial no Simples Nacional.
                     """)
                 else:
@@ -3736,12 +4137,12 @@ def analise_pontual(engine, dados, filtros):
                         'Pontos': '0',
                         'Avaliação': '-'
                     })
-                
+
                 # Distribuição equilibrada (indício de divisão artificial)
                 max_score_possivel += 2
                 desvio_padrao = receitas_por_cnpj.std()
                 coef_variacao = (desvio_padrao / receita_media) if receita_media > 0 else 0
-                
+
                 if coef_variacao < 0.3 and len(receitas_por_cnpj) > 1:
                     receitas_checks.append({
                         'Indicador': 'Distribuição de Receitas',
@@ -3762,21 +4163,21 @@ def analise_pontual(engine, dados, filtros):
                         'Pontos': '0',
                         'Avaliação': '-'
                     })
-                
+
                 # Correlação temporal (evolução sincronizada)
                 max_score_possivel += 3
                 if len(cnpjs_validos) > 1:
-                    pivot_receitas = resultados['pgdas'].pivot_table(
+                    pivot_receitas = df_analise.pivot_table(
                         index='periodo',
                         columns='cnpj',
                         values='receita_12m',
                         aggfunc='max'
                     )
-                    
+
                     if len(pivot_receitas) >= 3 and pivot_receitas.shape[1] > 1:
                         correlacoes = pivot_receitas.corr()
                         correlacao_media = correlacoes.values[np.triu_indices_from(correlacoes.values, k=1)].mean()
-                        
+
                         if correlacao_media > 0.7:
                             receitas_checks.append({
                                 'Indicador': 'Correlação Temporal',
@@ -3807,38 +4208,59 @@ def analise_pontual(engine, dados, filtros):
                                 'Pontos': '0',
                                 'Avaliação': '-'
                             })
-                
+
+                # Análise de regimes mistos (Simples + Normal)
+                if 'fonte' in df_analise.columns:
+                    fontes_por_cnpj = df_analise.groupby('cnpj')['fonte'].first()
+                    if len(fontes_por_cnpj.unique()) > 1:
+                        receitas_checks.append({
+                            'Indicador': 'Regimes Tributários',
+                            'Valor': f"{len(fontes_por_cnpj.unique())} regimes",
+                            'Status': '⚠️ MISTO',
+                            'Excesso': '-',
+                            'Pontos': '1',
+                            'Avaliação': 'Possível planejamento tributário'
+                        })
+                        score_similaridade += 1
+
                 df_receitas = pd.DataFrame(receitas_checks)
-                
+
                 # Garantir que todas as colunas sejam string
                 for col in df_receitas.columns:
                     df_receitas[col] = df_receitas[col].astype(str)
-                
+
                 st.dataframe(df_receitas, hide_index=True)
-                
+
                 # GRÁFICOS
                 col1, col2 = st.columns(2)
-                
+
                 with col1:
                     st.write("**Distribuição de Receitas por CNPJ:**")
+
+                    # Preparar dados para gráfico com cores por fonte
+                    df_bar = df_analise.groupby(['cnpj', 'fonte'])['receita_12m'].max().reset_index()
+
                     fig1 = px.bar(
-                        x=receitas_por_cnpj.index,
-                        y=receitas_por_cnpj.values,
-                        labels={'x': 'CNPJ', 'y': 'Receita (R$)'},
-                        title="Receita Máxima por CNPJ",
-                        template=filtros['tema']
+                        df_bar,
+                        x='cnpj',
+                        y='receita_12m',
+                        color='fonte' if 'fonte' in df_bar.columns else None,
+                        labels={'cnpj': 'CNPJ', 'receita_12m': 'Receita (R$)', 'fonte': 'Fonte'},
+                        title="Receita Máxima por CNPJ e Fonte",
+                        template=filtros['tema'],
+                        barmode='group'
                     )
-                    fig1.add_hline(y=4800000, line_dash="dash", line_color="red", 
+                    fig1.add_hline(y=4800000, line_dash="dash", line_color="red",
                                  annotation_text="Limite SN")
                     st.plotly_chart(fig1, use_container_width=True)
-                
+
                 with col2:
                     st.write("**Evolução da Receita Total do Grupo:**")
-                    
+
                     # Receita somada por período
-                    receita_grupo_temporal = resultados['pgdas'].groupby('periodo')['receita_12m'].sum().reset_index()
+                    receita_grupo_temporal = df_analise.groupby('periodo')['receita_12m'].sum().reset_index()
                     receita_grupo_temporal = receita_grupo_temporal.sort_values('periodo')
-                    
+
                     fig2 = px.line(
                         receita_grupo_temporal,
                         x='periodo',
@@ -3848,9 +4270,9 @@ def analise_pontual(engine, dados, filtros):
                         template=filtros['tema'],
                         markers=True
                     )
-                    fig2.add_hline(y=4800000, line_dash="dash", line_color="red", 
+                    fig2.add_hline(y=4800000, line_dash="dash", line_color="red",
                                  annotation_text="Limite SN", annotation_position="bottom right")
-                    
+
                     # Adicionar linha com valores
                     fig2.update_traces(
                         mode='lines+markers+text',
@@ -3858,24 +4280,36 @@ def analise_pontual(engine, dados, filtros):
                         textposition='top center',
                         textfont=dict(size=9)
                     )
-                    
+
                     st.plotly_chart(fig2, use_container_width=True)
-                
+
                 # Tabela detalhada da evolução temporal
                 if len(pivot_receitas) > 0:
                     st.write("**Receitas Detalhadas por CNPJ e Período:**")
-                    
+
                     # Adicionar coluna de total
                     pivot_display = pivot_receitas.copy()
                     pivot_display['TOTAL GRUPO'] = pivot_display.sum(axis=1)
-                    
+
                     # Formatar valores
                     pivot_display = pivot_display.applymap(lambda x: formatar_moeda(x) if pd.notna(x) else '-')
-                    
+
                     st.dataframe(pivot_display)
-                
+
+                # Tabela resumo por fonte
+                if 'fonte' in df_analise.columns:
+                    st.write("**Resumo por Fonte de Dados:**")
+                    resumo_fonte = df_analise.groupby('fonte').agg({
+                        'cnpj': 'nunique',
+                        'receita_12m': ['max', 'mean', 'sum']
+                    }).round(2)
+                    resumo_fonte.columns = ['Qtd CNPJs', 'Receita Máx', 'Receita Média', 'Receita Total']
+                    for col in ['Receita Máx', 'Receita Média', 'Receita Total']:
+                        resumo_fonte[col] = resumo_fonte[col].apply(formatar_moeda)
+                    st.dataframe(resumo_fonte)
+
             else:
-                st.warning("Dados de receitas insuficientes")
+                st.warning("Dados de receitas insuficientes (PGDAS ou DIME)")
         
         # ===================================================================
         # TAB 4: ANÁLISE DE NOTAS FISCAIS
@@ -4305,24 +4739,38 @@ def analise_pontual(engine, dados, filtros):
                 for _, row in resultados['funcionarios'].iterrows():
                     cnpj = row['cnpj']
                     funcionarios = row['total_funcionarios']
-                    
-                    # Buscar receita máxima do CNPJ
+
+                    # Buscar receita máxima do CNPJ (PGDAS ou DIME)
+                    receita = None
+                    fonte_receita = None
+
                     if not resultados['pgdas'].empty:
-                        receita = resultados['pgdas'][resultados['pgdas']['cnpj'] == cnpj]['receita_12m'].max()
-                        
-                        if pd.notna(receita) and receita > 0:
-                            receita_por_func = receita / (funcionarios + 1)  # +1 para evitar divisão por zero
-                            
-                            if receita_por_func > 500000:  # R$ 500k por funcionário
-                                func_checks.append({
-                                    'CNPJ': cnpj,
-                                    'Funcionários': int(funcionarios),
-                                    'Receita': formatar_moeda(receita),
-                                    'Receita/Func': formatar_moeda(receita_por_func),
-                                    'Status': '⚠️ DESPROPORCIONAL',
-                                    'Avaliação': 'Possível terceirização ou operação concentrada'
-                                })
-                                score_similaridade += 1
+                        receita_pgdas = resultados['pgdas'][resultados['pgdas']['cnpj'] == cnpj]['receita_12m'].max()
+                        if pd.notna(receita_pgdas) and receita_pgdas > 0:
+                            receita = receita_pgdas
+                            fonte_receita = 'PGDAS'
+
+                    if not resultados.get('dime', pd.DataFrame()).empty:
+                        receita_dime = resultados['dime'][resultados['dime']['cnpj'] == cnpj]['receita_12m'].max()
+                        if pd.notna(receita_dime) and receita_dime > 0:
+                            if receita is None or receita_dime > receita:
+                                receita = receita_dime
+                                fonte_receita = 'DIME'
+
+                    if receita is not None and receita > 0:
+                        receita_por_func = receita / (funcionarios + 1)  # +1 para evitar divisão por zero
+
+                        if receita_por_func > 500000:  # R$ 500k por funcionário
+                            func_checks.append({
+                                'CNPJ': cnpj,
+                                'Funcionários': int(funcionarios),
+                                'Receita': formatar_moeda(receita),
+                                'Fonte': fonte_receita,
+                                'Receita/Func': formatar_moeda(receita_por_func),
+                                'Status': '⚠️ DESPROPORCIONAL',
+                                'Avaliação': 'Possível terceirização ou operação concentrada'
+                            })
+                            score_similaridade += 1
                 
                 # Total de funcionários do grupo
                 total_funcionarios = resultados['funcionarios']['total_funcionarios'].sum()
