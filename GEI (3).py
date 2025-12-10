@@ -482,7 +482,55 @@ def carregar_dossie_completo(_engine, num_grupo):
     except Exception as e:
         print(f"Erro ao carregar inconsistências NFe: {e}")
         dossie['inconsistencias'] = pd.DataFrame()
-    
+
+    # =========================================================================
+    # 12. FATURAMENTO (PGDAS + DIME CONSOLIDADO)
+    # =========================================================================
+    try:
+        # Buscar CNPJs do grupo primeiro
+        cnpjs_grupo = dossie['cnpjs']['cnpj'].tolist() if not dossie['cnpjs'].empty else []
+
+        if cnpjs_grupo:
+            cnpjs_str = "', '".join([str(c) for c in cnpjs_grupo])
+
+            # Query PGDAS
+            query_pgdas = f"""
+            SELECT
+                cnpj,
+                jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                jul2025, ago2025, set2025,
+                'PGDAS' as fonte
+            FROM gessimples.gei_pgdas
+            WHERE cnpj IN ('{cnpjs_str}')
+            """
+            df_pgdas = pd.read_sql(query_pgdas, _engine)
+
+            # Query DIME
+            query_dime = f"""
+            SELECT
+                cnpj,
+                jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                jul2025, ago2025, set2025,
+                'DIME' as fonte
+            FROM gessimples.gei_dime
+            WHERE cnpj IN ('{cnpjs_str}')
+            """
+            try:
+                df_dime = pd.read_sql(query_dime, _engine)
+            except:
+                df_dime = pd.DataFrame()
+
+            # Consolidar
+            if not df_pgdas.empty or not df_dime.empty:
+                dossie['faturamento'] = pd.concat([df_pgdas, df_dime], ignore_index=True)
+            else:
+                dossie['faturamento'] = pd.DataFrame()
+        else:
+            dossie['faturamento'] = pd.DataFrame()
+    except Exception as e:
+        print(f"Erro ao carregar faturamento: {e}")
+        dossie['faturamento'] = pd.DataFrame()
+
     return dossie
 
 # =============================================================================
@@ -5160,11 +5208,152 @@ def dashboard_executivo(dados, filtros):
     if 'valor_max' in df_top.columns:
         df_top['Receita'] = df_top['valor_max'].apply(formatar_moeda)
     
-    colunas = ['num_grupo', score_col, 'qntd_cnpj', 
+    colunas = ['num_grupo', score_col, 'qntd_cnpj',
                'Receita', 'qtd_total_indicios', 'nivel_risco_grupo_economico']
     colunas_exist = [c for c in colunas if c in df_top.columns]
-    
+
     st.dataframe(df_top[colunas_exist], width='stretch', hide_index=True)
+
+    # =========================================================================
+    # IMPACTO FISCAL - GRUPOS DE ALTO RISCO
+    # =========================================================================
+    st.divider()
+    st.subheader("Impacto Fiscal - Grupos de Alto Risco")
+
+    st.info("""
+    Esta análise identifica grupos com **score alto** que potencialmente operam de forma fragmentada
+    para permanecer no Simples Nacional, evitando a tributação do Regime Normal.
+    """)
+
+    # Definir threshold para "alto risco"
+    col1, col2 = st.columns(2)
+    with col1:
+        score_threshold = st.slider(
+            "Score mínimo para considerar alto risco:",
+            min_value=10.0,
+            max_value=50.0,
+            value=20.0,
+            step=1.0,
+            key="score_threshold_impacto"
+        )
+    with col2:
+        receita_min = st.slider(
+            "Receita mínima (em milhões):",
+            min_value=1.0,
+            max_value=10.0,
+            value=4.8,
+            step=0.5,
+            key="receita_threshold_impacto"
+        ) * 1e6
+
+    # Filtrar grupos de alto risco
+    df_alto_risco = df[
+        (df[score_col] >= score_threshold) &
+        (df['valor_max'] >= receita_min)
+    ].copy()
+
+    if df_alto_risco.empty:
+        st.warning("Nenhum grupo encontrado com os critérios selecionados.")
+    else:
+        # Métricas principais
+        col1, col2, col3, col4 = st.columns(4)
+
+        qtd_grupos_risco = len(df_alto_risco)
+        qtd_cnpjs_risco = int(df_alto_risco['qntd_cnpj'].sum())
+        soma_faturamento = df_alto_risco['valor_max'].sum()
+
+        # Cálculo do impacto fiscal estimado
+        # Diferença aproximada entre Simples Nacional e Regime Normal (ICMS)
+        # Simples: ~6% média | Normal: ~18% ICMS => Diferença: ~12%
+        DIFERENCA_ALIQUOTA = 0.12  # 12% de diferença média
+
+        impacto_fiscal_estimado = soma_faturamento * DIFERENCA_ALIQUOTA
+
+        with col1:
+            st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}")
+        with col2:
+            st.metric("CNPJs Envolvidos", f"{qtd_cnpjs_risco:,}")
+        with col3:
+            st.metric("Soma Faturamento", formatar_moeda(soma_faturamento))
+        with col4:
+            st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado), delta="potencial não arrecadado")
+
+        st.divider()
+
+        # Detalhamento do cálculo
+        st.write("**Metodologia do Cálculo de Impacto Fiscal:**")
+        st.markdown(f"""
+        - **Simples Nacional:** Alíquota média aproximada de **6%**
+        - **Regime Normal:** ICMS de **18%** (média SC)
+        - **Diferença:** ~**12%** de tributo não recolhido
+        - **Fórmula:** Faturamento Total × 12% = Impacto Estimado
+
+        > **Nota:** Este é um cálculo simplificado. O valor real pode variar conforme
+        > a atividade econômica, faixa de faturamento do Simples e outros fatores.
+        """)
+
+        st.divider()
+
+        # Tabela detalhada dos grupos de alto risco
+        st.write("**Grupos Identificados:**")
+
+        df_display = df_alto_risco.copy()
+        df_display['Faturamento'] = df_display['valor_max'].apply(formatar_moeda)
+        df_display['Impacto_Estimado'] = (df_display['valor_max'] * DIFERENCA_ALIQUOTA).apply(formatar_moeda)
+        df_display['Acima_Limite_SN'] = df_display['valor_max'].apply(lambda x: 'SIM' if x > 4800000 else 'NÃO')
+
+        colunas_exibir = ['num_grupo', score_col, 'qntd_cnpj', 'Faturamento',
+                         'Impacto_Estimado', 'Acima_Limite_SN']
+        if 'nivel_risco_grupo_economico' in df_display.columns:
+            colunas_exibir.append('nivel_risco_grupo_economico')
+        if 'nivel_risco_ccs' in df_display.columns:
+            colunas_exibir.append('nivel_risco_ccs')
+
+        colunas_exibir = [c for c in colunas_exibir if c in df_display.columns]
+
+        st.dataframe(
+            df_display[colunas_exibir].sort_values(score_col, ascending=False),
+            width='stretch',
+            hide_index=True
+        )
+
+        # Gráfico de distribuição
+        col1, col2 = st.columns(2)
+
+        with col1:
+            fig = px.histogram(
+                df_alto_risco,
+                x='valor_max',
+                nbins=20,
+                title="Distribuição de Faturamento - Grupos de Alto Risco",
+                template=filtros['tema'],
+                labels={'valor_max': 'Faturamento (R$)'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            # Top 10 por impacto
+            df_top_impacto = df_alto_risco.nlargest(10, 'valor_max').copy()
+            df_top_impacto['Impacto'] = df_top_impacto['valor_max'] * DIFERENCA_ALIQUOTA / 1e6
+
+            fig = px.bar(
+                df_top_impacto,
+                x='num_grupo',
+                y='Impacto',
+                title="Top 10 Grupos por Impacto Fiscal (em milhões)",
+                template=filtros['tema'],
+                labels={'Impacto': 'Impacto Fiscal (R$ milhões)', 'num_grupo': 'Grupo'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Download
+        csv = df_display[colunas_exibir].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Grupos Alto Risco (CSV)",
+            data=csv,
+            file_name="grupos_alto_risco_impacto_fiscal.csv",
+            mime="text/csv"
+        )
 
 def ranking_grupos(dados, filtros):
     """Página de ranking de grupos"""
@@ -5731,9 +5920,45 @@ def menu_pagamentos(engine, dados, filtros):
     df_top['Valor Empresas'] = df_top['valor_meios_pagamento_empresas'].apply(formatar_moeda)
     df_top['Valor Sócios'] = df_top['valor_meios_pagamento_socios'].apply(formatar_moeda)
     
-    st.dataframe(df_top[['num_grupo', 'indice_risco_pagamentos', 'Valor Empresas', 'Valor Sócios', 
-                         'qntd_cnpj', score_col]], 
+    st.dataframe(df_top[['num_grupo', 'indice_risco_pagamentos', 'Valor Empresas', 'Valor Sócios',
+                         'qntd_cnpj', score_col]],
                 width='stretch', hide_index=True)
+
+    # =========================================================================
+    # DRILL DOWN POR GRUPO
+    # =========================================================================
+    st.divider()
+    st.subheader("Detalhes por Grupo")
+
+    grupo_selecionado = st.selectbox(
+        "Selecione um grupo para ver detalhes:",
+        options=['Selecione...'] + sorted(df_pag['num_grupo'].unique().tolist()),
+        key="pagamentos_drill_down"
+    )
+
+    if grupo_selecionado and grupo_selecionado != 'Selecione...':
+        info_grupo = df_pag[df_pag['num_grupo'] == grupo_selecionado].iloc[0]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Grupo", grupo_selecionado)
+        with col2:
+            st.metric("CNPJs", int(info_grupo['qntd_cnpj']))
+        with col3:
+            st.metric("Valor Empresas", formatar_moeda(info_grupo['valor_meios_pagamento_empresas']))
+        with col4:
+            st.metric("Valor Sócios", formatar_moeda(info_grupo['valor_meios_pagamento_socios']))
+
+        st.write(f"**Índice de Risco Pagamentos:** {info_grupo['indice_risco_pagamentos']:.4f}")
+        st.write(f"**Score Final:** {info_grupo[score_col]:.2f}")
+
+        # Buscar detalhes dos CNPJs do grupo
+        try:
+            cnpjs_grupo = dados['cnpj'][dados['cnpj']['num_grupo'] == grupo_selecionado]['cnpj'].tolist()
+            if cnpjs_grupo:
+                st.write(f"**CNPJs do grupo:** {', '.join(cnpjs_grupo[:10])}{'...' if len(cnpjs_grupo) > 10 else ''}")
+        except:
+            pass
 
 def menu_funcionarios(engine, dados, filtros):
     """Análise de funcionários"""
@@ -5813,9 +6038,43 @@ def menu_funcionarios(engine, dados, filtros):
         df_top['Faturamento'] = df_top['valor_max'].apply(formatar_moeda)
         df_top['Receita_por_Funcionario'] = df_top['valor_max'] / df_top['total_funcionarios']
         
-        st.dataframe(df_top[['num_grupo', 'Faturamento', 'total_funcionarios', 
-                             'Receita_por_Funcionario', 'qntd_cnpj', score_col]], 
+        st.dataframe(df_top[['num_grupo', 'Faturamento', 'total_funcionarios',
+                             'Receita_por_Funcionario', 'qntd_cnpj', score_col]],
                     width='stretch', hide_index=True)
+
+    # =========================================================================
+    # DRILL DOWN POR GRUPO
+    # =========================================================================
+    st.divider()
+    st.subheader("Detalhes por Grupo")
+
+    grupo_selecionado = st.selectbox(
+        "Selecione um grupo para ver detalhes:",
+        options=['Selecione...'] + sorted(df_func['num_grupo'].unique().tolist()),
+        key="funcionarios_drill_down"
+    )
+
+    if grupo_selecionado and grupo_selecionado != 'Selecione...':
+        info_grupo = df_func[df_func['num_grupo'] == grupo_selecionado].iloc[0]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Grupo", grupo_selecionado)
+        with col2:
+            st.metric("CNPJs", int(info_grupo['qntd_cnpj']))
+        with col3:
+            st.metric("Total Funcionários", int(info_grupo['total_funcionarios']))
+        with col4:
+            st.metric("Faturamento", formatar_moeda(info_grupo['valor_max']))
+
+        if 'indice_risco_fat_func' in info_grupo:
+            st.write(f"**Índice de Risco Fat/Func:** {info_grupo['indice_risco_fat_func']:.4f}")
+        st.write(f"**Score Final:** {info_grupo[score_col]:.2f}")
+
+        # Cálculo de receita por funcionário
+        if info_grupo['total_funcionarios'] > 0:
+            receita_por_func = info_grupo['valor_max'] / info_grupo['total_funcionarios']
+            st.write(f"**Receita por Funcionário:** {formatar_moeda(receita_por_func)}")
 
 def menu_c115(engine, dados, filtros):
     """Análise Convênio 115"""
@@ -6222,10 +6481,50 @@ def menu_financeiro(engine, dados, filtros):
     st.subheader("Top 30 Grupos por Receita")
     df_top = df.nlargest(30, 'valor_max').copy()
     df_top['Receita'] = df_top['valor_max'].apply(formatar_moeda)
-    
+
     st.dataframe(df_top[['num_grupo', 'Receita', 'qntd_cnpj', 'total_funcionarios',
-                         score_col, 'nivel_risco_grupo_economico']], 
+                         score_col, 'nivel_risco_grupo_economico']],
                 width='stretch', hide_index=True)
+
+    # =========================================================================
+    # DRILL DOWN POR GRUPO
+    # =========================================================================
+    st.divider()
+    st.subheader("Detalhes por Grupo")
+
+    grupo_selecionado = st.selectbox(
+        "Selecione um grupo para ver detalhes:",
+        options=['Selecione...'] + sorted(df['num_grupo'].unique().tolist()),
+        key="financeiro_drill_down"
+    )
+
+    if grupo_selecionado and grupo_selecionado != 'Selecione...':
+        info_grupo = df[df['num_grupo'] == grupo_selecionado].iloc[0]
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Grupo", grupo_selecionado)
+        with col2:
+            st.metric("CNPJs", int(info_grupo['qntd_cnpj']))
+        with col3:
+            st.metric("Receita Máxima", formatar_moeda(info_grupo['valor_max']))
+        with col4:
+            st.metric("Período Máximo", str(info_grupo.get('periodo_max', 'N/A')))
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("1º Excesso Limite", str(info_grupo.get('periodo', 'Nunca')))
+        with col2:
+            func = info_grupo.get('total_funcionarios', 0)
+            st.metric("Funcionários", int(func) if pd.notna(func) else 0)
+        with col3:
+            st.metric("Score Final", f"{info_grupo[score_col]:.2f}")
+
+        # Indicar se está acima do limite do Simples
+        if info_grupo['valor_max'] > 4800000:
+            st.error(f"ATENÇÃO: Receita acima do limite do Simples Nacional (R$ 4,8M)")
+            excesso = info_grupo['valor_max'] - 4800000
+            st.write(f"**Excesso sobre o limite:** {formatar_moeda(excesso)}")
 
 def inconsistencias_nfe(engine, dados, filtros):
     """Análise de inconsistências de NFe"""
@@ -6480,8 +6779,51 @@ def indicios_fiscais(dados, filtros):
     df_top = df.nlargest(30, 'qtd_total_indicios')
     score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
     st.dataframe(df_top[['num_grupo', 'qtd_total_indicios', 'qtd_tipos_indicios_distintos',
-                        score_col, 'qntd_cnpj']], 
+                        score_col, 'qntd_cnpj']],
                 width='stretch', hide_index=True)
+
+    # =========================================================================
+    # DRILL DOWN POR GRUPO
+    # =========================================================================
+    st.divider()
+    st.subheader("Detalhes por Grupo")
+
+    df_com_indicios = df[df['qtd_total_indicios'] > 0]
+    if df_com_indicios.empty:
+        st.info("Nenhum grupo com indícios para detalhar.")
+    else:
+        grupo_selecionado = st.selectbox(
+            "Selecione um grupo para ver detalhes dos indícios:",
+            options=['Selecione...'] + sorted(df_com_indicios['num_grupo'].unique().tolist()),
+            key="indicios_drill_down"
+        )
+
+        if grupo_selecionado and grupo_selecionado != 'Selecione...':
+            info_grupo = df[df['num_grupo'] == grupo_selecionado].iloc[0]
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Grupo", grupo_selecionado)
+            with col2:
+                st.metric("Total Indícios", int(info_grupo['qtd_total_indicios']))
+            with col3:
+                st.metric("Tipos Distintos", int(info_grupo['qtd_tipos_indicios_distintos']))
+            with col4:
+                st.metric("CNPJs", int(info_grupo['qntd_cnpj']))
+
+            col1, col2 = st.columns(2)
+            with col1:
+                perc = info_grupo.get('perc_cnpjs_com_indicios', 0)
+                st.metric("% CNPJs com Indícios", f"{perc:.1f}%" if pd.notna(perc) else "N/A")
+            with col2:
+                st.metric("Score Final", f"{info_grupo[score_col]:.2f}")
+
+            # Mostrar detalhes dos indícios se disponível
+            if 'indicios' in dados and not dados['indicios'].empty:
+                df_indicios_grupo = dados['indicios'][dados['indicios']['num_grupo'] == grupo_selecionado]
+                if not df_indicios_grupo.empty:
+                    st.write("**Indícios encontrados:**")
+                    st.dataframe(df_indicios_grupo, hide_index=True, use_container_width=True)
 
 def vinculos_societarios(dados, filtros):
     """Análise de vínculos societários"""
@@ -6599,8 +6941,9 @@ def dossie_grupo(engine, dados, filtros):
             st.metric("Sócios Compartilhados", int(socios_val) if pd.notna(socios_val) else 0)
     
     # Tabs para organizar informações
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
         "CNPJs e Cadastro",
+        "Receita/Faturamento",
         "Sócios",
         "Indícios",
         "Inconsistências NFe",
@@ -6638,11 +6981,122 @@ def dossie_grupo(engine, dados, filtros):
             )
         else:
             st.error("❌ Nenhum CNPJ encontrado para este grupo.")
-    
+
     # =========================================================================
-    # TAB 2: SÓCIOS
+    # TAB 2: RECEITA/FATURAMENTO (PGDAS + DIME)
     # =========================================================================
     with tab2:
+        st.subheader("Receita/Faturamento (PGDAS + DIME)")
+
+        # Métricas do gei_percent
+        if not dossie['principal'].empty:
+            info = dossie['principal'].iloc[0]
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                valor_max = info.get('valor_max', 0)
+                st.metric("Receita Máxima (12m)", formatar_moeda(valor_max) if pd.notna(valor_max) else "R$ 0,00")
+            with col2:
+                periodo_max = info.get('periodo_max', 'N/A')
+                st.metric("Período Máximo", str(periodo_max) if pd.notna(periodo_max) else "N/A")
+            with col3:
+                periodo_exc = info.get('periodo', 'N/A')
+                st.metric("1º Excesso Limite SN", str(periodo_exc) if pd.notna(periodo_exc) else "Nunca")
+            with col4:
+                acima_limite = "SIM" if pd.notna(valor_max) and valor_max > 4800000 else "NÃO"
+                st.metric("Acima R$ 4,8M?", acima_limite)
+
+            st.divider()
+
+        # Dados de faturamento detalhado
+        if 'faturamento' in dossie and not dossie['faturamento'].empty:
+            df_fat = dossie['faturamento'].copy()
+
+            # Resumo por fonte
+            col1, col2 = st.columns(2)
+            with col1:
+                qtd_pgdas = len(df_fat[df_fat['fonte'] == 'PGDAS'])
+                st.metric("CNPJs com PGDAS (Simples)", qtd_pgdas)
+            with col2:
+                qtd_dime = len(df_fat[df_fat['fonte'] == 'DIME'])
+                st.metric("CNPJs com DIME (Normal)", qtd_dime)
+
+            st.divider()
+
+            # Sub-tabs para PGDAS e DIME
+            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Consolidado", "PGDAS (Simples)", "DIME (Normal)"])
+
+            with sub_tab1:
+                st.write("**Faturamento Consolidado (últimos meses de 2025):**")
+
+                # Calcular último valor de cada CNPJ
+                meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025', 'mar2025', 'fev2025', 'jan2025']
+                df_consolidado = df_fat.copy()
+
+                # Pegar o último valor não-zero para cada CNPJ
+                def get_ultimo_valor(row):
+                    for mes in meses_cols:
+                        if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                            return row[mes]
+                    return 0
+
+                df_consolidado['ultimo_valor_12m'] = df_consolidado.apply(get_ultimo_valor, axis=1)
+
+                # Agrupar por CNPJ pegando o maior valor (caso tenha PGDAS e DIME)
+                df_resumo = df_consolidado.groupby('cnpj').agg({
+                    'ultimo_valor_12m': 'max',
+                    'fonte': lambda x: ', '.join(x.unique())
+                }).reset_index()
+                df_resumo.columns = ['CNPJ', 'Receita 12m', 'Fonte']
+                df_resumo['Acima Limite'] = df_resumo['Receita 12m'].apply(lambda x: 'SIM' if x > 4800000 else 'NÃO')
+                df_resumo['Receita 12m Formatada'] = df_resumo['Receita 12m'].apply(formatar_moeda)
+
+                # Totais
+                total_receita = df_resumo['Receita 12m'].sum()
+                cnpjs_acima = len(df_resumo[df_resumo['Receita 12m'] > 4800000])
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total CNPJs", len(df_resumo))
+                with col2:
+                    st.metric("Receita Total (soma)", formatar_moeda(total_receita))
+                with col3:
+                    st.metric("CNPJs Acima Limite", cnpjs_acima)
+
+                st.dataframe(
+                    df_resumo[['CNPJ', 'Receita 12m Formatada', 'Fonte', 'Acima Limite']].sort_values('Receita 12m', ascending=False, key=lambda x: df_resumo['Receita 12m']),
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+            with sub_tab2:
+                df_pgdas = df_fat[df_fat['fonte'] == 'PGDAS'].copy()
+                if not df_pgdas.empty:
+                    st.write(f"**{len(df_pgdas)} CNPJs com dados PGDAS (Simples Nacional):**")
+                    for col in df_pgdas.columns:
+                        if col not in ['cnpj', 'fonte']:
+                            df_pgdas[col] = df_pgdas[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) else 'R$ 0,00')
+                    st.dataframe(df_pgdas, hide_index=True, use_container_width=True)
+                else:
+                    st.info("Nenhum CNPJ com dados PGDAS encontrado.")
+
+            with sub_tab3:
+                df_dime = df_fat[df_fat['fonte'] == 'DIME'].copy()
+                if not df_dime.empty:
+                    st.write(f"**{len(df_dime)} CNPJs com dados DIME (Regime Normal):**")
+                    for col in df_dime.columns:
+                        if col not in ['cnpj', 'fonte']:
+                            df_dime[col] = df_dime[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) else 'R$ 0,00')
+                    st.dataframe(df_dime, hide_index=True, use_container_width=True)
+                else:
+                    st.info("Nenhum CNPJ com dados DIME encontrado.")
+        else:
+            st.info("Nenhum dado de faturamento disponível para este grupo.")
+
+    # =========================================================================
+    # TAB 3: SÓCIOS
+    # =========================================================================
+    with tab3:
         st.subheader("Sócios Compartilhados")
         
         if not dossie['socios'].empty:
@@ -6671,9 +7125,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum sócio compartilhado encontrado.")
     
     # =========================================================================
-    # TAB 3: INDÍCIOS
+    # TAB 4: INDÍCIOS
     # =========================================================================
-    with tab3:
+    with tab4:
         st.subheader("Indícios Fiscais")
         
         if not dossie['indicios'].empty:
@@ -6716,9 +7170,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum indício encontrado.")
     
     # =========================================================================
-    # TAB 4: INCONSISTÊNCIAS NFE
+    # TAB 5: INCONSISTÊNCIAS NFE
     # =========================================================================
-    with tab4:
+    with tab5:
         st.subheader("Inconsistências em Notas Fiscais")
         
         if not dossie['inconsistencias'].empty:
@@ -6859,9 +7313,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum documento analisado.")
     
     # =========================================================================
-    # TAB 5: CONVÊNIO 115
+    # TAB 6: CONVÊNIO 115
     # =========================================================================
-    with tab5:
+    with tab6:
         st.subheader("Dados Convênio 115")
         
         if not dossie['c115'].empty:
@@ -6892,9 +7346,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum dado C115 disponível para este grupo.")
     
     # =========================================================================
-    # TAB 6: CCS
+    # TAB 7: CCS
     # =========================================================================
-    with tab6:
+    with tab7:
         st.subheader("Dados CCS (Contas Compartilhadas)")
         
         # Métricas principais do gei_percent
@@ -6964,9 +7418,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum padrão coordenado encontrado.")
     
     # =========================================================================
-    # TAB 7: FUNCIONÁRIOS
+    # TAB 8: FUNCIONÁRIOS
     # =========================================================================
-    with tab7:
+    with tab8:
         st.subheader("Dados de Funcionários")
         
         if not dossie['funcionarios'].empty:
@@ -6992,9 +7446,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum dado de funcionários disponível.")
     
     # =========================================================================
-    # TAB 8: PAGAMENTOS
+    # TAB 9: PAGAMENTOS
     # =========================================================================
-    with tab8:
+    with tab9:
         st.subheader("Dados de Meios de Pagamento")
         
         if not dossie['pagamentos'].empty:
@@ -7020,9 +7474,9 @@ def dossie_grupo(engine, dados, filtros):
             st.info("Nenhum dado de pagamentos disponível.")
     
     # =========================================================================
-    # TAB 9: MÉTRICAS DETALHADAS
+    # TAB 10: MÉTRICAS DETALHADAS
     # =========================================================================
-    with tab9:
+    with tab10:
         st.subheader("Métricas Detalhadas")
         
         if not dossie['principal'].empty:
@@ -7041,9 +7495,9 @@ def dossie_grupo(engine, dados, filtros):
             st.dataframe(df_metricas, width='stretch', hide_index=True)
     
     # =========================================================================
-    # TAB 10: EXPORTAÇÃO
+    # TAB 11: EXPORTAÇÃO
     # =========================================================================
-    with tab10:
+    with tab11:
         st.subheader("Exportação de Relatório")
         
         st.write("""
