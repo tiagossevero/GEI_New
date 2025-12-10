@@ -7080,7 +7080,7 @@ def dossie_grupo(engine, dados, filtros):
                     st.metric("CNPJs Acima Limite", cnpjs_acima)
 
                 st.dataframe(
-                    df_resumo[['CNPJ', 'Receita 12m Formatada', 'Fonte', 'Acima Limite']].sort_values('Receita 12m', ascending=False, key=lambda x: df_resumo['Receita 12m']),
+                    df_resumo.sort_values('Receita 12m', ascending=False)[['CNPJ', 'Receita 12m Formatada', 'Fonte', 'Acima Limite']],
                     hide_index=True,
                     use_container_width=True
                 )
