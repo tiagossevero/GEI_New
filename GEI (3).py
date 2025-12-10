@@ -5262,19 +5262,35 @@ def dashboard_executivo(dados, filtros):
         qtd_cnpjs_risco = int(df_alto_risco['qntd_cnpj'].sum())
         soma_faturamento = df_alto_risco['valor_max'].sum()
 
-        # Cálculo do impacto fiscal estimado
-        # Diferença aproximada entre Simples Nacional e Regime Normal (ICMS)
-        # Simples: ~6% média | Normal: ~18% ICMS => Diferença: ~12%
-        DIFERENCA_ALIQUOTA = 0.12  # 12% de diferença média
+        # Cálculo do impacto fiscal estimado - APENAS PARA EMPRESAS DO SIMPLES
+        # Diferença entre Regime Normal e Simples Nacional (ICMS SC)
+        # Normal: 17% | Simples: ~10% => Diferença: 7%
+        DIFERENCA_ALIQUOTA = 0.07  # 7% de diferença
 
-        impacto_fiscal_estimado = soma_faturamento * DIFERENCA_ALIQUOTA
+        # Calcular faturamento apenas de empresas no Simples Nacional
+        if 'qntd_sn' in df_alto_risco.columns and 'qntd_normal' in df_alto_risco.columns:
+            # Proporção de empresas no Simples por grupo
+            total_cnpjs = df_alto_risco['qntd_sn'].fillna(0) + df_alto_risco['qntd_normal'].fillna(0)
+            df_alto_risco['prop_simples'] = df_alto_risco['qntd_sn'].fillna(0) / total_cnpjs.replace(0, 1)
+            # Faturamento estimado do Simples = valor_max * proporção de empresas no Simples
+            df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max'] * df_alto_risco['prop_simples']
+            soma_faturamento_simples = df_alto_risco['faturamento_simples'].sum()
+            qtd_cnpjs_simples = int(df_alto_risco['qntd_sn'].fillna(0).sum())
+        else:
+            # Se não tiver a coluna, assume todo faturamento é do Simples
+            soma_faturamento_simples = soma_faturamento
+            df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max']
+            qtd_cnpjs_simples = qtd_cnpjs_risco
+
+        # Impacto calculado apenas sobre faturamento do Simples Nacional
+        impacto_fiscal_estimado = soma_faturamento_simples * DIFERENCA_ALIQUOTA
 
         with col1:
             st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}")
         with col2:
-            st.metric("CNPJs Envolvidos", f"{qtd_cnpjs_risco:,}")
+            st.metric("CNPJs no Simples", f"{qtd_cnpjs_simples:,}")
         with col3:
-            st.metric("Soma Faturamento", formatar_moeda(soma_faturamento))
+            st.metric("Faturamento Simples", formatar_moeda(soma_faturamento_simples))
         with col4:
             st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado), delta="potencial não arrecadado")
 
@@ -5283,13 +5299,13 @@ def dashboard_executivo(dados, filtros):
         # Detalhamento do cálculo
         st.write("**Metodologia do Cálculo de Impacto Fiscal:**")
         st.markdown(f"""
-        - **Simples Nacional:** Alíquota média aproximada de **6%**
-        - **Regime Normal:** ICMS de **18%** (média SC)
-        - **Diferença:** ~**12%** de tributo não recolhido
-        - **Fórmula:** Faturamento Total × 12% = Impacto Estimado
+        - **Simples Nacional:** Alíquota média de **10%**
+        - **Regime Normal:** ICMS de **17%** (SC)
+        - **Diferença:** **7%** de tributo não recolhido
+        - **Fórmula:** Faturamento do Simples × 7% = Impacto Estimado
 
-        > **Nota:** Este é um cálculo simplificado. O valor real pode variar conforme
-        > a atividade econômica, faixa de faturamento do Simples e outros fatores.
+        > **Nota:** O cálculo considera apenas o faturamento das empresas do Simples Nacional.
+        > Empresas já no Regime Normal não são consideradas no impacto.
         """)
 
         st.divider()
