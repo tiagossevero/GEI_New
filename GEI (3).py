@@ -40,6 +40,8 @@ Receita Estadual de Santa Catarina
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import folium
+from streamlit_folium import st_folium
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
@@ -7970,6 +7972,556 @@ def menu_analises(engine, dados, filtros):
             st.dataframe(df_display, width='stretch', hide_index=True)
 
 # =============================================================================
+# DICIONÁRIO DE COORDENADAS DOS MUNICÍPIOS DE SC
+# =============================================================================
+
+COORDENADAS_MUNICIPIOS_SC = {
+    'FLORIANOPOLIS': (-27.5954, -48.5480),
+    'JOINVILLE': (-26.3045, -48.8487),
+    'BLUMENAU': (-26.9194, -49.0661),
+    'SAO JOSE': (-27.6136, -48.6366),
+    'CHAPECO': (-27.1006, -52.6156),
+    'CRICIUMA': (-28.6775, -49.3697),
+    'ITAJAI': (-26.9078, -48.6619),
+    'JARAGUA DO SUL': (-26.4853, -49.0689),
+    'LAGES': (-27.8157, -50.3264),
+    'PALHOCA': (-27.6456, -48.6682),
+    'BRUSQUE': (-27.0979, -48.9173),
+    'TUBARAO': (-28.4669, -49.0068),
+    'SAO BENTO DO SUL': (-26.2503, -49.3786),
+    'CACADOR': (-26.7753, -51.0150),
+    'CONCORDIA': (-27.2339, -52.0278),
+    'CAMBORIU': (-27.0253, -48.6542),
+    'BALNEARIO CAMBORIU': (-26.9906, -48.6347),
+    'RIO DO SUL': (-27.2142, -49.6431),
+    'BIGUACU': (-27.4942, -48.6558),
+    'NAVEGANTES': (-26.8986, -48.6544),
+    'GASPAR': (-26.9314, -49.1158),
+    'CANOINHAS': (-26.1769, -50.3908),
+    'MAFRA': (-26.1117, -49.8053),
+    'INDAIAL': (-26.8978, -49.2317),
+    'ICARA': (-28.7136, -49.2994),
+    'ARARANGUA': (-28.9353, -49.4858),
+    'TIJUCAS': (-27.2411, -48.6336),
+    'XANXERE': (-26.8764, -52.4039),
+    'IMBITUBA': (-28.2400, -48.6700),
+    'VIDEIRA': (-27.0078, -51.1517),
+    'CURITIBANOS': (-27.2831, -50.5847),
+    'SAO FRANCISCO DO SUL': (-26.2428, -48.6389),
+    'PORTO UNIAO': (-26.2372, -51.0742),
+    'LAGUNA': (-28.4828, -48.7819),
+    'SAO MIGUEL DO OESTE': (-26.7250, -53.5153),
+    'PENHA': (-26.7706, -48.6464),
+    'TIMBÓ': (-26.8236, -49.2731),
+    'TIMBO': (-26.8236, -49.2731),
+    'POMERODE': (-26.7408, -49.1764),
+    'JOACABA': (-27.1781, -51.5022),
+    'ORLEANS': (-28.3578, -49.2917),
+    'URUSSANGA': (-28.5189, -49.3208),
+    'SOMBRIO': (-29.1050, -49.6317),
+    'TURVO': (-28.9256, -49.6769),
+    'FORQUILHINHA': (-28.7464, -49.4728),
+    'COCAL DO SUL': (-28.6006, -49.3283),
+    'MORRO DA FUMACA': (-28.6533, -49.2186),
+    'NOVA VENEZA': (-28.6336, -49.5000),
+    'SIDEROPOLIS': (-28.5939, -49.4258),
+    'CAPIVARI DE BAIXO': (-28.4500, -48.9583),
+    'GRAVATAL': (-28.3222, -49.0444),
+    'BRACO DO NORTE': (-28.2750, -49.1658),
+    'SAO LUDGERO': (-28.3306, -49.1764),
+    'GRÃO PARA': (-28.1833, -49.2250),
+    'GRAO PARA': (-28.1833, -49.2250),
+    'SANTA ROSA DO SUL': (-29.1333, -49.7167),
+    'PRAIA GRANDE': (-29.1917, -49.9500),
+    'SAO JOAO DO SUL': (-29.2167, -49.8000),
+    'PASSO DE TORRES': (-29.3083, -49.7250),
+    'BALNEARIO ARROIO DO SILVA': (-28.9833, -49.4167),
+    'BALNEARIO GAIVOTA': (-29.1500, -49.5833),
+    'ERMO': (-28.9833, -49.6333),
+    'MELEIRO': (-28.8250, -49.6333),
+    'MORRO GRANDE': (-28.8000, -49.7167),
+    'TREVISO': (-28.5167, -49.4667),
+    'LAURO MULLER': (-28.3917, -49.4000),
+    'BOM JARDIM DA SERRA': (-28.3333, -49.6333),
+    'SAO JOAQUIM': (-28.2944, -49.9319),
+    'URUBICI': (-28.0150, -49.5917),
+    'URUPEMA': (-28.2917, -49.8750),
+    'PAINEL': (-27.9250, -50.1000),
+    'BOCAINA DO SUL': (-27.7500, -49.9417),
+    'OTACILIO COSTA': (-27.4833, -50.1250),
+    'CORREIA PINTO': (-27.5833, -50.3583),
+    'PONTE ALTA': (-27.4833, -50.3833),
+    'SAO JOSE DO CERRITO': (-27.6583, -50.5750),
+    'CAMPO BELO DO SUL': (-27.8917, -50.7583),
+    'CERRO NEGRO': (-27.7917, -50.8667),
+    'CAPAO ALTO': (-28.2333, -50.5083),
+    'ANITA GARIBALDI': (-27.6917, -51.1250),
+    'CELSO RAMOS': (-27.6333, -51.3417),
+    'ABDON BATISTA': (-27.6083, -51.0250),
+    'CAMPOS NOVOS': (-27.4014, -51.2258),
+    'MONTE CARLO': (-27.2167, -50.9833),
+    'BRUNOPOLIS': (-27.3000, -50.8667),
+    'VARGEM': (-27.4833, -50.5500),
+    'FRAIBURGO': (-27.0250, -50.9208),
+    'TANGARA': (-27.0917, -51.2500),
+    'IBICARE': (-27.0917, -51.3750),
+    'PIRATUBA': (-27.4250, -51.7667),
+    'CAPINZAL': (-27.3500, -51.6083),
+    'OURO': (-27.3333, -51.6167),
+    'LACERDOPOLIS': (-27.2583, -51.5583),
+    'HERVAL DO OESTE': (-27.1917, -51.4917),
+    'CATANDUVAS': (-27.0667, -51.6667),
+    'AGUA DOCE': (-26.9983, -51.5525),
+    'IRANI': (-27.0333, -51.9000),
+    'PONTE SERRADA': (-26.8750, -52.0083),
+    'VARGEAO': (-26.8583, -52.1583),
+    'FAXINAL DOS GUEDES': (-26.8417, -52.2667),
+    'OURO VERDE': (-26.6917, -52.3083),
+    'BOM JESUS': (-26.7333, -52.3917),
+    'IPUACU': (-26.6333, -52.4500),
+    'ENTRE RIOS': (-26.7167, -52.5417),
+    'ABELARDO LUZ': (-26.5667, -52.3333),
+    'SAO DOMINGOS': (-26.5583, -52.5333),
+    'GALVAO': (-26.4583, -52.6917),
+    'JUPIA': (-26.3917, -52.7333),
+    'CORONEL MARTINS': (-26.5083, -52.6750),
+    'LAJEADO GRANDE': (-26.8583, -52.5750),
+    'PASSOS MAIA': (-26.7833, -52.0583),
+    'LUZERNA': (-27.1333, -51.4667),
+    'IBIAM': (-27.1833, -51.2333),
+    'ZORTEA': (-27.4500, -51.5500),
+    'TREZE TILIAS': (-26.9583, -51.4083),
+    'SALTO VELOSO': (-26.9000, -51.4000),
+    'MACIEIRA': (-26.8583, -51.3667),
+    'CALMON': (-26.5917, -51.0917),
+    'MATOS COSTA': (-26.4667, -51.1500),
+    'TIMBÓ GRANDE': (-26.6167, -50.6583),
+    'TIMBO GRANDE': (-26.6167, -50.6583),
+    'SANTA CECILIA': (-26.9583, -50.4250),
+    'LEBON REGIS': (-26.9250, -50.6917),
+    'MONTE CASTELO': (-26.4583, -50.2333),
+    'PAPANDUVA': (-26.4333, -50.1417),
+    'IRINEÓPOLIS': (-26.2417, -50.7917),
+    'IRINEOPOLIS': (-26.2417, -50.7917),
+    'TRES BARRAS': (-26.1083, -50.3167),
+    'MAJOR VIEIRA': (-26.3667, -50.3250),
+    'BELA VISTA DO TOLDO': (-26.2833, -50.4667),
+    'ITAIÓPOLIS': (-26.3383, -49.9081),
+    'ITAIOPOLIS': (-26.3383, -49.9081),
+    'RIO NEGRINHO': (-26.2586, -49.5181),
+    'CAMPO ALEGRE': (-26.1928, -49.2661),
+    'CORUPÁ': (-26.4247, -49.2447),
+    'CORUPA': (-26.4247, -49.2447),
+    'SCHROEDER': (-26.4133, -49.0728),
+    'GUARAMIRIM': (-26.4692, -49.0011),
+    'MASSARANDUBA': (-26.6125, -49.0086),
+    'LUIZ ALVES': (-26.7150, -48.9317),
+    'ILHOTA': (-26.9028, -48.8247),
+    'PENHA': (-26.7706, -48.6464),
+    'PICARRAS': (-26.7539, -48.6767),
+    'BALNEARIO BARRA DO SUL': (-26.4589, -48.6119),
+    'ARAQUARI': (-26.3728, -48.7172),
+    'GARUVA': (-26.0247, -48.8539),
+    'GUARUVA': (-26.0247, -48.8539),
+    'ITAPOA': (-26.1167, -48.6167),
+    'BOMBINHAS': (-27.1383, -48.5147),
+    'PORTO BELO': (-27.1592, -48.5531),
+    'GOVERNADOR CELSO RAMOS': (-27.3167, -48.5583),
+    'ANTONIO CARLOS': (-27.5158, -48.7689),
+    'ANGELINA': (-27.5708, -48.9883),
+    'RANCHO QUEIMADO': (-27.6708, -49.0192),
+    'ANITAPOLIS': (-27.9017, -49.1308),
+    'ALFREDO WAGNER': (-27.7000, -49.3333),
+    'LEOBERTO LEAL': (-27.5083, -49.2750),
+    'MAJOR GERCINO': (-27.4167, -49.0333),
+    'NOVA TRENTO': (-27.2861, -49.0786),
+    'CANELINHA': (-27.2636, -48.7650),
+    'SAO JOAO BATISTA': (-27.2761, -48.8489),
+    'AGUAS MORNAS': (-27.6958, -48.8236),
+    'SANTO AMARO DA IMPERATRIZ': (-27.6897, -48.7797),
+    'PAULO LOPES': (-27.9608, -48.6869),
+    'GAROPABA': (-28.0269, -48.6183),
+    'IMARUI': (-28.3333, -48.8167),
+    'SAO MARTINHO': (-28.1667, -48.9833),
+    'ARMAZEM': (-28.2417, -49.0167),
+    'RIO FORTUNA': (-28.1250, -49.1083),
+    'SANTA ROSA DE LIMA': (-28.0333, -49.1333),
+    'SANGAO': (-28.6333, -49.1333),
+    'JAGUARUNA': (-28.6147, -49.0256),
+    'TREZE DE MAIO': (-28.5500, -49.1500),
+    'PEDRAS GRANDES': (-28.4333, -49.1917),
+    'IBIRAMA': (-27.0567, -49.5175),
+    'PRESIDENTE GETULIO': (-27.0500, -49.6250),
+    'DONA EMMA': (-26.9833, -49.7167),
+    'WITMARSUM': (-26.9250, -49.7917),
+    'JOSE BOITEUX': (-26.9583, -49.6250),
+    'VITOR MEIRELES': (-26.8833, -49.8333),
+    'SALETE': (-26.9750, -49.9917),
+    'TAIO': (-27.1167, -49.9917),
+    'POUSO REDONDO': (-27.2583, -49.9333),
+    'TROMBUDO CENTRAL': (-27.2917, -49.7917),
+    'AGRONOMICA': (-27.2667, -49.7083),
+    'AURORA': (-27.3083, -49.6333),
+    'ATALANTA': (-27.4250, -49.7750),
+    'IMBUIA': (-27.4917, -49.4250),
+    'VIDAL RAMOS': (-27.3917, -49.3667),
+    'LONTRAS': (-27.1667, -49.5333),
+    'APIUNA': (-27.0333, -49.3917),
+    'ASCURRA': (-26.9500, -49.3667),
+    'RODEIO': (-26.9222, -49.3650),
+    'BENEDITO NOVO': (-26.7833, -49.3583),
+    'DOUTOR PEDRINHO': (-26.7167, -49.4833),
+    'RIO DOS CEDROS': (-26.7417, -49.2750),
+    'APIUNA': (-27.0333, -49.3917),
+    'BOTUVERÁ': (-27.2000, -49.0667),
+    'BOTUVERA': (-27.2000, -49.0667),
+    'GUABIRUBA': (-27.0833, -48.9833),
+    'AGROLÂNDIA': (-27.4083, -49.8250),
+    'AGROLANDIA': (-27.4083, -49.8250),
+    'PETROLÂNDIA': (-27.5333, -49.6917),
+    'PETROLANDIA': (-27.5333, -49.6917),
+    'ITUPORANGA': (-27.4106, -49.6031),
+    'CHAPADÃO DO LAGEADO': (-27.5917, -49.5500),
+    'CHAPADAO DO LAGEADO': (-27.5917, -49.5500),
+    'PRESIDENTE NEREU': (-27.2750, -49.3917),
+    'LAURENTINO': (-27.2167, -49.7333),
+    'MIRIM DOCE': (-27.1917, -50.0583),
+    'SANTA TEREZINHA': (-26.7833, -50.0167),
+    'MODELO': (-26.7750, -53.0417),
+    'SERRA ALTA': (-26.7250, -53.0417),
+    'CAIBI': (-27.0750, -53.2500),
+    'PALMITOS': (-27.0667, -53.1583),
+    'CUNHA PORA': (-26.8917, -53.1667),
+    'MARAVILHA': (-26.7639, -53.1714),
+    'SAUDADES': (-26.9250, -53.0083),
+    'PINHALZINHO': (-26.8500, -52.9917),
+    'NOVA ERECHIM': (-26.8917, -52.9083),
+    'UNIAO DO OESTE': (-26.7583, -52.8583),
+    'JARDINOPOLIS': (-26.7167, -52.8583),
+    'CORDILHEIRA ALTA': (-26.9833, -52.6083),
+    'GUATAMBU': (-27.1333, -52.7917),
+    'PLANALTO ALEGRE': (-27.0667, -52.8667),
+    'NOVA ITABERABA': (-26.9417, -52.8083),
+    'CAXAMBU DO SUL': (-27.1583, -52.8833),
+    'AGUASDECHAPECO': (-27.0750, -52.9833),
+    'AGUAS DE CHAPECO': (-27.0750, -52.9833),
+    'SAO CARLOS': (-27.0833, -53.0083),
+    'QUILOMBO': (-26.7250, -52.7250),
+    'FORMOSA DO SUL': (-26.6417, -52.7917),
+    'SANTIAGO DO SUL': (-26.6417, -52.6833),
+    'IRATI': (-26.6583, -52.8917),
+    'ARVOREDO': (-27.0750, -52.4583),
+    'SEARA': (-27.1500, -52.3083),
+    'XAVANTINA': (-27.0667, -52.3417),
+    'LINDOIA DO SUL': (-27.0500, -52.0667),
+    'IPUMIRIM': (-27.0750, -52.1333),
+    'ITA': (-27.2833, -52.3250),
+    'ARABUTA': (-27.1583, -52.3000),
+    'ALTO BELA VISTA': (-27.4333, -51.9000),
+    'PERITIBA': (-27.3750, -51.9083),
+    'IPIRA': (-27.4000, -51.7750),
+    'PRESIDENTE CASTELLO BRANCO': (-27.2250, -51.8083),
+    'JABORÁ': (-27.1750, -51.7333),
+    'JABORA': (-27.1750, -51.7333),
+    'ERVAL VELHO': (-27.2750, -51.4417),
+    'PINHEIRO PRETO': (-27.0500, -51.2250),
+    'IOMERE': (-27.0000, -51.2417),
+    'ARROIO TRINTA': (-26.9250, -51.3417),
+    'CACADOR': (-26.7753, -51.0150),
+    'RIO DAS ANTAS': (-26.8917, -51.0750),
+    'CAÇADOR': (-26.7753, -51.0150),
+    'SAO LOURENCO DO OESTE': (-26.3583, -52.8500),
+    'NOVO HORIZONTE': (-26.4417, -52.8250),
+    'CAMPO ERÊ': (-26.3917, -53.0833),
+    'CAMPO ERE': (-26.3917, -53.0833),
+    'SALTINHO': (-26.6083, -53.0583),
+    'SAO BERNARDINO': (-26.4750, -52.9667),
+    'CORONEL FREITAS': (-26.9083, -52.7000),
+    'AGUAS FRIAS': (-26.8750, -52.8583),
+    'SUL BRASIL': (-26.7333, -52.9667),
+    'ITAPIRANGA': (-27.1697, -53.7117),
+    'SAO JOAO DO OESTE': (-27.0917, -53.5917),
+    'TUNAPOLIS': (-26.9667, -53.6417),
+    'IPORA DO OESTE': (-26.9833, -53.5333),
+    'SANTA HELENA': (-26.9333, -53.6167),
+    'MONDAI': (-27.1000, -53.4000),
+    'RIQUEZA': (-27.0667, -53.3250),
+    'ROMELANDIA': (-26.9250, -53.3167),
+    'SAO MIGUEL DA BOA VISTA': (-26.6917, -53.2500),
+    'BARRA BONITA': (-26.6500, -53.4417),
+    'GUARACIABA': (-26.6000, -53.5250),
+    'SAO JOSE DO CEDRO': (-26.4583, -53.4917),
+    'PRINCESA': (-26.4417, -53.6000),
+    'PARAISO': (-26.6167, -53.6750),
+    'ANCHIETA': (-26.5333, -53.3333),
+    'BANDEIRANTE': (-26.7667, -53.6417),
+    'DESCANSO': (-26.8250, -53.5000),
+    'BOM JESUS DO OESTE': (-26.6917, -53.1000),
+    'TIGRINHOS': (-26.6833, -53.1583),
+    'DIONISIO CERQUEIRA': (-26.2583, -53.6333),
+    'GUARUJA DO SUL': (-26.3833, -53.5333),
+    'PALMA SOLA': (-26.3500, -53.2750),
+    'FLOR DO SERTAO': (-26.7833, -53.3500),
+    'IRACEMINHA': (-26.8167, -53.2750),
+    'ROMELÂNDIA': (-26.9250, -53.3167),
+}
+
+# =============================================================================
+# FUNÇÃO MENU MAPA - VISUALIZAÇÃO GEOGRÁFICA DAS EMPRESAS
+# =============================================================================
+
+def menu_mapa(engine, dados, filtros):
+    """Exibe mapa interativo com localização das empresas por grupo econômico"""
+
+    st.title("Mapa de Empresas por Grupo Econômico")
+    st.markdown("""
+    Visualize a distribuição geográfica das empresas em Santa Catarina.
+    Você pode ver todas as empresas ou filtrar por um grupo econômico específico.
+    """)
+
+    # Opções de visualização
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        modo_visualizacao = st.radio(
+            "Modo de visualização:",
+            ["Todos os Grupos", "Grupo Específico"],
+            help="Escolha se quer ver todas as empresas ou apenas de um grupo"
+        )
+
+    # Carregar dados de empresas com localização
+    @st.cache_data(ttl=3600)
+    def carregar_empresas_mapa(_engine, num_grupo=None):
+        """Carrega empresas com município para o mapa"""
+        if num_grupo:
+            query = f"""
+            SELECT
+                g.num_grupo,
+                g.cnpj,
+                c.nm_razao_social,
+                c.nm_fantasia,
+                c.nm_munic as municipio,
+                c.cd_cnae
+            FROM {DATABASE}.gei_cnpj g
+            LEFT JOIN usr_sat_ods.vw_ods_contrib c ON g.cnpj = c.nu_cnpj
+            WHERE g.num_grupo = '{num_grupo}'
+            """
+        else:
+            # Limitar para performance
+            query = f"""
+            SELECT
+                g.num_grupo,
+                g.cnpj,
+                c.nm_razao_social,
+                c.nm_fantasia,
+                c.nm_munic as municipio,
+                c.cd_cnae
+            FROM {DATABASE}.gei_cnpj g
+            LEFT JOIN usr_sat_ods.vw_ods_contrib c ON g.cnpj = c.nu_cnpj
+            LIMIT 10000
+            """
+
+        try:
+            df = pd.read_sql(query, _engine)
+            df.columns = [col.lower() for col in df.columns]
+            return df
+        except Exception as e:
+            st.error(f"Erro ao carregar dados: {e}")
+            return pd.DataFrame()
+
+    # Função para obter coordenadas do município
+    def obter_coordenadas(municipio):
+        """Retorna latitude e longitude do município"""
+        if pd.isna(municipio):
+            return None, None
+
+        # Normalizar nome do município (remover acentos, upper)
+        import unicodedata
+        municipio_norm = unicodedata.normalize('NFKD', str(municipio).upper())
+        municipio_norm = ''.join(c for c in municipio_norm if not unicodedata.combining(c))
+        municipio_norm = municipio_norm.strip()
+
+        # Buscar no dicionário
+        if municipio_norm in COORDENADAS_MUNICIPIOS_SC:
+            return COORDENADAS_MUNICIPIOS_SC[municipio_norm]
+
+        # Tentar variações
+        for key in COORDENADAS_MUNICIPIOS_SC:
+            if key in municipio_norm or municipio_norm in key:
+                return COORDENADAS_MUNICIPIOS_SC[key]
+
+        return None, None
+
+    # Gerar cores distintas para grupos
+    def gerar_cor_grupo(num_grupo):
+        """Gera uma cor distinta baseada no número do grupo"""
+        cores = [
+            'red', 'blue', 'green', 'purple', 'orange', 'darkred',
+            'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue',
+            'darkpurple', 'pink', 'lightblue', 'lightgreen', 'gray',
+            'black', 'lightgray'
+        ]
+        try:
+            idx = hash(str(num_grupo)) % len(cores)
+            return cores[idx]
+        except:
+            return 'blue'
+
+    # Lógica principal baseada no modo de visualização
+    if modo_visualizacao == "Grupo Específico":
+        with col2:
+            # Obter lista de grupos disponíveis
+            grupos_disponiveis = sorted(dados['percent']['num_grupo'].unique().tolist())
+
+            grupo_selecionado = st.selectbox(
+                "Selecione o Grupo Econômico:",
+                grupos_disponiveis,
+                format_func=lambda x: f"Grupo {x}"
+            )
+
+        if grupo_selecionado:
+            with st.spinner(f"Carregando empresas do Grupo {grupo_selecionado}..."):
+                df_empresas = carregar_empresas_mapa(engine, grupo_selecionado)
+    else:
+        with col2:
+            st.info("Exibindo até 10.000 empresas para melhor performance")
+
+        with st.spinner("Carregando empresas..."):
+            df_empresas = carregar_empresas_mapa(engine)
+
+    if df_empresas.empty:
+        st.warning("Nenhuma empresa encontrada com os filtros selecionados.")
+        return
+
+    # Adicionar coordenadas
+    df_empresas['lat'] = df_empresas['municipio'].apply(lambda x: obter_coordenadas(x)[0])
+    df_empresas['lon'] = df_empresas['municipio'].apply(lambda x: obter_coordenadas(x)[1])
+
+    # Filtrar apenas empresas com coordenadas válidas
+    df_com_coords = df_empresas.dropna(subset=['lat', 'lon'])
+
+    # Estatísticas
+    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+
+    with col_stat1:
+        st.metric("Total de Empresas", f"{len(df_empresas):,}")
+
+    with col_stat2:
+        st.metric("Com Localização", f"{len(df_com_coords):,}")
+
+    with col_stat3:
+        st.metric("Municípios", f"{df_com_coords['municipio'].nunique():,}")
+
+    with col_stat4:
+        if modo_visualizacao == "Todos os Grupos":
+            st.metric("Grupos", f"{df_com_coords['num_grupo'].nunique():,}")
+        else:
+            st.metric("Grupo", f"{grupo_selecionado}")
+
+    if df_com_coords.empty:
+        st.warning("Nenhuma empresa possui localização válida para exibir no mapa.")
+        return
+
+    # Criar mapa centrado em SC
+    mapa = folium.Map(
+        location=[-27.5954, -49.0000],  # Centro de SC
+        zoom_start=7,
+        tiles='cartodbpositron'
+    )
+
+    # Adicionar marcadores
+    if modo_visualizacao == "Grupo Específico":
+        # Todos da mesma cor para o grupo específico
+        for _, row in df_com_coords.iterrows():
+            popup_html = f"""
+            <div style='width: 250px'>
+                <b>CNPJ:</b> {row['cnpj']}<br>
+                <b>Razão Social:</b> {row.get('nm_razao_social', 'N/A')}<br>
+                <b>Fantasia:</b> {row.get('nm_fantasia', 'N/A')}<br>
+                <b>Município:</b> {row['municipio']}<br>
+                <b>CNAE:</b> {row.get('cd_cnae', 'N/A')}<br>
+                <b>Grupo:</b> {row['num_grupo']}
+            </div>
+            """
+
+            folium.Marker(
+                location=[row['lat'], row['lon']],
+                popup=folium.Popup(popup_html, max_width=300),
+                tooltip=f"{row.get('nm_fantasia', row['cnpj'])}",
+                icon=folium.Icon(color='red', icon='building', prefix='fa')
+            ).add_to(mapa)
+    else:
+        # Cores diferentes por grupo
+        # Usar MarkerCluster para melhor performance
+        from folium.plugins import MarkerCluster
+        marker_cluster = MarkerCluster().add_to(mapa)
+
+        for _, row in df_com_coords.iterrows():
+            popup_html = f"""
+            <div style='width: 250px'>
+                <b>CNPJ:</b> {row['cnpj']}<br>
+                <b>Razão Social:</b> {row.get('nm_razao_social', 'N/A')}<br>
+                <b>Fantasia:</b> {row.get('nm_fantasia', 'N/A')}<br>
+                <b>Município:</b> {row['municipio']}<br>
+                <b>CNAE:</b> {row.get('cd_cnae', 'N/A')}<br>
+                <b>Grupo:</b> {row['num_grupo']}
+            </div>
+            """
+
+            cor = gerar_cor_grupo(row['num_grupo'])
+
+            folium.Marker(
+                location=[row['lat'], row['lon']],
+                popup=folium.Popup(popup_html, max_width=300),
+                tooltip=f"Grupo {row['num_grupo']} - {row.get('nm_fantasia', row['cnpj'])}",
+                icon=folium.Icon(color=cor, icon='building', prefix='fa')
+            ).add_to(marker_cluster)
+
+    # Exibir mapa
+    st.subheader("Mapa de Localização")
+    st_folium(mapa, width=None, height=600, use_container_width=True)
+
+    # Tabela de empresas por município
+    st.subheader("Distribuição por Município")
+
+    df_municipios = df_com_coords.groupby('municipio').agg({
+        'cnpj': 'count',
+        'num_grupo': 'nunique'
+    }).reset_index()
+    df_municipios.columns = ['Município', 'Qtd Empresas', 'Qtd Grupos']
+    df_municipios = df_municipios.sort_values('Qtd Empresas', ascending=False)
+
+    col_chart, col_table = st.columns([1, 1])
+
+    with col_chart:
+        # Gráfico de barras dos top municípios
+        fig = px.bar(
+            df_municipios.head(15),
+            x='Município',
+            y='Qtd Empresas',
+            color='Qtd Grupos',
+            title='Top 15 Municípios por Número de Empresas',
+            template=filtros.get('tema', 'plotly_white')
+        )
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_table:
+        st.dataframe(
+            df_municipios,
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
+
+    # Lista de empresas (opcional, expandível)
+    with st.expander("Ver Lista de Empresas"):
+        df_display = df_com_coords[['cnpj', 'nm_razao_social', 'nm_fantasia', 'municipio', 'num_grupo']].copy()
+        df_display.columns = ['CNPJ', 'Razão Social', 'Nome Fantasia', 'Município', 'Grupo']
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+
+# =============================================================================
 # FUNÇÃO PRINCIPAL
 # =============================================================================
 
@@ -7993,7 +8545,8 @@ def main():
         "Indícios Fiscais",
         "Vínculos Societários",
         "Dossiê do Grupo",
-        "🤖 Machine Learning",  # ADICIONE AQUI
+        "🗺️ Mapa",
+        "🤖 Machine Learning",
         "Análises"
     ]
     
@@ -8046,7 +8599,9 @@ def main():
         vinculos_societarios(dados, filtros)
     elif pag == "Dossiê do Grupo":
         dossie_grupo(engine, dados, filtros)
-    elif pag == "🤖 Machine Learning":  # CORRIGIDO
+    elif pag == "🗺️ Mapa":
+        menu_mapa(engine, dados, filtros)
+    elif pag == "🤖 Machine Learning":
         analise_machine_learning(engine, dados, filtros)
     elif pag == "Análises":
         menu_analises(engine, dados, filtros)
