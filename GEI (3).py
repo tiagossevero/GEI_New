@@ -7106,13 +7106,43 @@ def dossie_grupo(engine, dados, filtros):
                         df_chart['ordem'] = df_chart['periodo'].map(ordem_meses)
                         df_chart = df_chart.sort_values('ordem')
 
+                        # Gráfico 1: Receita TOTAL do grupo (soma de todos os CNPJs)
+                        df_total_grupo = df_chart.groupby('periodo').agg({
+                            'receita': 'sum',
+                            'ordem': 'first'
+                        }).reset_index().sort_values('ordem')
+
+                        fig_total = px.line(
+                            df_total_grupo,
+                            x='periodo',
+                            y='receita',
+                            title="Receita TOTAL do Grupo (soma de todos os CNPJs)",
+                            labels={'receita': 'Receita Total (R$)', 'periodo': 'Período'},
+                            markers=True
+                        )
+                        fig_total.add_hline(y=4800000, line_dash="dash", line_color="red",
+                                           annotation_text="Limite SN (R$ 4,8M)")
+                        fig_total.update_traces(line=dict(width=3, color='#1f77b4'), marker=dict(size=10))
+                        st.plotly_chart(fig_total, use_container_width=True)
+
+                        # Verificar se ultrapassou limite em algum mês
+                        meses_acima = df_total_grupo[df_total_grupo['receita'] > 4800000]
+                        if not meses_acima.empty:
+                            primeiro_mes = meses_acima.iloc[0]['periodo']
+                            valor_primeiro = meses_acima.iloc[0]['receita']
+                            st.error(f"⚠️ **ALERTA:** Receita total do grupo ultrapassou o limite do Simples Nacional em **{primeiro_mes}** (R$ {valor_primeiro:,.2f})")
+
+                        st.divider()
+
+                        # Gráfico 2: Evolução individual por CNPJ
+                        st.write("**Evolução por CNPJ (individual):**")
                         fig = px.line(
                             df_chart,
                             x='periodo',
                             y='receita',
                             color='cnpj',
                             line_dash='fonte',
-                            title="Evolução do Faturamento - Todas as Fontes",
+                            title="Evolução do Faturamento por CNPJ",
                             labels={'receita': 'Receita (R$)', 'periodo': 'Período', 'fonte': 'Fonte', 'cnpj': 'CNPJ'},
                             markers=True
                         )
