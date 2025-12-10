@@ -7080,19 +7080,94 @@ def dossie_grupo(engine, dados, filtros):
                     st.metric("CNPJs Acima Limite", cnpjs_acima)
 
                 st.dataframe(
-                    df_resumo[['CNPJ', 'Receita 12m Formatada', 'Fonte', 'Acima Limite']].sort_values('Receita 12m', ascending=False, key=lambda x: df_resumo['Receita 12m']),
+                    df_resumo.sort_values('Receita 12m', ascending=False)[['CNPJ', 'Receita 12m Formatada', 'Fonte', 'Acima Limite']],
                     hide_index=True,
                     use_container_width=True
                 )
+
+                # Gráfico de evolução consolidada
+                st.divider()
+                st.write("**Evolução do Faturamento por Mês:**")
+                try:
+                    # Transformar dados de wide para long
+                    meses_disponiveis = [m for m in meses_cols if m in df_fat.columns]
+                    df_chart = df_fat.melt(
+                        id_vars=['cnpj', 'fonte'],
+                        value_vars=meses_disponiveis,
+                        var_name='periodo',
+                        value_name='receita'
+                    )
+                    df_chart = df_chart[df_chart['receita'].notna() & (df_chart['receita'] > 0)]
+
+                    if not df_chart.empty:
+                        # Ordenar períodos cronologicamente
+                        ordem_meses = {'jan2025': 1, 'fev2025': 2, 'mar2025': 3, 'abr2025': 4,
+                                      'mai2025': 5, 'jun2025': 6, 'jul2025': 7, 'ago2025': 8, 'set2025': 9}
+                        df_chart['ordem'] = df_chart['periodo'].map(ordem_meses)
+                        df_chart = df_chart.sort_values('ordem')
+
+                        fig = px.line(
+                            df_chart,
+                            x='periodo',
+                            y='receita',
+                            color='cnpj',
+                            line_dash='fonte',
+                            title="Evolução do Faturamento - Todas as Fontes",
+                            labels={'receita': 'Receita (R$)', 'periodo': 'Período', 'fonte': 'Fonte', 'cnpj': 'CNPJ'},
+                            markers=True
+                        )
+                        fig.add_hline(y=4800000, line_dash="dash", line_color="red",
+                                     annotation_text="Limite SN (R$ 4,8M)")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Sem dados suficientes para gerar o gráfico.")
+                except Exception as e:
+                    st.warning(f"Não foi possível gerar o gráfico: {e}")
 
             with sub_tab2:
                 df_pgdas = df_fat[df_fat['fonte'] == 'PGDAS'].copy()
                 if not df_pgdas.empty:
                     st.write(f"**{len(df_pgdas)} CNPJs com dados PGDAS (Simples Nacional):**")
-                    for col in df_pgdas.columns:
+
+                    # Gráfico PGDAS (antes de formatar)
+                    try:
+                        meses_disponiveis = [m for m in meses_cols if m in df_pgdas.columns]
+                        df_chart_pgdas = df_pgdas.melt(
+                            id_vars=['cnpj'],
+                            value_vars=meses_disponiveis,
+                            var_name='periodo',
+                            value_name='receita'
+                        )
+                        df_chart_pgdas = df_chart_pgdas[df_chart_pgdas['receita'].notna() & (df_chart_pgdas['receita'] > 0)]
+
+                        if not df_chart_pgdas.empty:
+                            ordem_meses = {'jan2025': 1, 'fev2025': 2, 'mar2025': 3, 'abr2025': 4,
+                                          'mai2025': 5, 'jun2025': 6, 'jul2025': 7, 'ago2025': 8, 'set2025': 9}
+                            df_chart_pgdas['ordem'] = df_chart_pgdas['periodo'].map(ordem_meses)
+                            df_chart_pgdas = df_chart_pgdas.sort_values('ordem')
+
+                            fig_pgdas = px.line(
+                                df_chart_pgdas,
+                                x='periodo',
+                                y='receita',
+                                color='cnpj',
+                                title="Evolução da Receita PGDAS (Simples Nacional)",
+                                labels={'receita': 'Receita (R$)', 'periodo': 'Período', 'cnpj': 'CNPJ'},
+                                markers=True
+                            )
+                            fig_pgdas.add_hline(y=4800000, line_dash="dash", line_color="red",
+                                               annotation_text="Limite SN (R$ 4,8M)")
+                            st.plotly_chart(fig_pgdas, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Não foi possível gerar o gráfico PGDAS: {e}")
+
+                    st.divider()
+                    st.write("**Tabela Detalhada:**")
+                    df_pgdas_display = df_pgdas.copy()
+                    for col in df_pgdas_display.columns:
                         if col not in ['cnpj', 'fonte']:
-                            df_pgdas[col] = df_pgdas[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) else 'R$ 0,00')
-                    st.dataframe(df_pgdas, hide_index=True, use_container_width=True)
+                            df_pgdas_display[col] = df_pgdas_display[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) else 'R$ 0,00')
+                    st.dataframe(df_pgdas_display, hide_index=True, use_container_width=True)
                 else:
                     st.info("Nenhum CNPJ com dados PGDAS encontrado.")
 
@@ -7100,10 +7175,44 @@ def dossie_grupo(engine, dados, filtros):
                 df_dime = df_fat[df_fat['fonte'] == 'DIME'].copy()
                 if not df_dime.empty:
                     st.write(f"**{len(df_dime)} CNPJs com dados DIME (Regime Normal):**")
-                    for col in df_dime.columns:
+
+                    # Gráfico DIME (antes de formatar)
+                    try:
+                        meses_disponiveis = [m for m in meses_cols if m in df_dime.columns]
+                        df_chart_dime = df_dime.melt(
+                            id_vars=['cnpj'],
+                            value_vars=meses_disponiveis,
+                            var_name='periodo',
+                            value_name='faturamento'
+                        )
+                        df_chart_dime = df_chart_dime[df_chart_dime['faturamento'].notna() & (df_chart_dime['faturamento'] > 0)]
+
+                        if not df_chart_dime.empty:
+                            ordem_meses = {'jan2025': 1, 'fev2025': 2, 'mar2025': 3, 'abr2025': 4,
+                                          'mai2025': 5, 'jun2025': 6, 'jul2025': 7, 'ago2025': 8, 'set2025': 9}
+                            df_chart_dime['ordem'] = df_chart_dime['periodo'].map(ordem_meses)
+                            df_chart_dime = df_chart_dime.sort_values('ordem')
+
+                            fig_dime = px.line(
+                                df_chart_dime,
+                                x='periodo',
+                                y='faturamento',
+                                color='cnpj',
+                                title="Evolução do Faturamento DIME (Regime Normal)",
+                                labels={'faturamento': 'Faturamento (R$)', 'periodo': 'Período', 'cnpj': 'CNPJ'},
+                                markers=True
+                            )
+                            st.plotly_chart(fig_dime, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Não foi possível gerar o gráfico DIME: {e}")
+
+                    st.divider()
+                    st.write("**Tabela Detalhada:**")
+                    df_dime_display = df_dime.copy()
+                    for col in df_dime_display.columns:
                         if col not in ['cnpj', 'fonte']:
-                            df_dime[col] = df_dime[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) else 'R$ 0,00')
-                    st.dataframe(df_dime, hide_index=True, use_container_width=True)
+                            df_dime_display[col] = df_dime_display[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) else 'R$ 0,00')
+                    st.dataframe(df_dime_display, hide_index=True, use_container_width=True)
                 else:
                     st.info("Nenhum CNPJ com dados DIME encontrado.")
         else:
