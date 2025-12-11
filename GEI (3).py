@@ -6959,7 +6959,7 @@ def dossie_grupo(engine, dados, filtros):
             st.metric("Sócios Compartilhados", int(socios_val) if pd.notna(socios_val) else 0)
     
     # Tabs para organizar informações
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "CNPJs e Cadastro",
         "Receita/Faturamento",
         "Sócios",
@@ -6970,6 +6970,7 @@ def dossie_grupo(engine, dados, filtros):
         "Funcionários",
         "Pagamentos",
         "Métricas Detalhadas",
+        "Análise de Similaridade",
         "Exportação"
     ])
     
@@ -7650,11 +7651,849 @@ def dossie_grupo(engine, dados, filtros):
             
             df_metricas = pd.DataFrame(metricas)
             st.dataframe(df_metricas, width='stretch', hide_index=True)
-    
+
     # =========================================================================
-    # TAB 11: EXPORTAÇÃO
+    # TAB 11: ANÁLISE DE SIMILARIDADE - EVIDÊNCIAS DE GRUPO ECONÔMICO
     # =========================================================================
     with tab11:
+        st.subheader("🔍 Análise de Similaridade - Evidências de Grupo Econômico")
+
+        st.info("""
+        Esta análise verifica se os CNPJs do grupo compartilham informações que indicam
+        formação de grupo econômico, conforme metodologia do Sistema GEI.
+        """)
+
+        # Inicializar variáveis de controle
+        evidencias = {}
+        score_similaridade = 0
+        max_score_possivel = 0
+        cnpjs_grupo = dossie['cnpjs']['cnpj'].tolist() if not dossie['cnpjs'].empty else []
+
+        if len(cnpjs_grupo) < 2:
+            st.warning("O grupo precisa ter pelo menos 2 CNPJs para análise de similaridade.")
+        else:
+            # Criar abas para cada tipo de análise
+            tabs_similaridade = st.tabs([
+                "📋 Cadastro",
+                "👥 Sócios",
+                "📊 Receitas",
+                "📄 Notas Fiscais",
+                "📱 Convênio 115",
+                "🏦 Contas Bancárias",
+                "👔 Funcionários",
+                "💳 Pagamentos",
+                "📊 Score Final"
+            ])
+
+            # ===================================================================
+            # TAB 1: ANÁLISE DE DADOS CADASTRAIS
+            # ===================================================================
+            with tabs_similaridade[0]:
+                st.subheader("Consistência Cadastral")
+
+                if not dossie['cnpjs'].empty and len(dossie['cnpjs']) > 1:
+                    cadastro_checks = []
+
+                    # Razão Social
+                    max_score_possivel += 2
+                    if 'nm_razao_social' in dossie['cnpjs'].columns:
+                        razoes = dossie['cnpjs']['nm_razao_social'].dropna().unique()
+                        if len(razoes) == 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Razão Social',
+                                'Status': '✅ IDÊNTICA',
+                                'Quantidade': '1',
+                                'Pontos': 2,
+                                'Avaliação': 'CRÍTICO - Forte indício'
+                            })
+                            evidencias['razao_social'] = True
+                            score_similaridade += 2
+                        elif len(razoes) > 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Razão Social',
+                                'Status': '❌ DIFERENTES',
+                                'Quantidade': str(len(razoes)),
+                                'Pontos': 0,
+                                'Avaliação': '-'
+                            })
+
+                    # Nome Fantasia
+                    max_score_possivel += 1
+                    if 'nm_fantasia' in dossie['cnpjs'].columns:
+                        fantasias = dossie['cnpjs']['nm_fantasia'].dropna().unique()
+                        if len(fantasias) == 1 and len(str(fantasias[0])) > 0:
+                            cadastro_checks.append({
+                                'Atributo': 'Nome Fantasia',
+                                'Status': '✅ IDÊNTICO',
+                                'Quantidade': '1',
+                                'Pontos': 1,
+                                'Avaliação': 'Alto indício'
+                            })
+                            evidencias['fantasia'] = True
+                            score_similaridade += 1
+                        elif len(fantasias) > 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Nome Fantasia',
+                                'Status': '❌ DIFERENTES',
+                                'Quantidade': str(len(fantasias)),
+                                'Pontos': 0,
+                                'Avaliação': '-'
+                            })
+
+                    # CNAE
+                    max_score_possivel += 1
+                    if 'cd_cnae' in dossie['cnpjs'].columns:
+                        cnaes = dossie['cnpjs']['cd_cnae'].dropna().unique()
+                        if len(cnaes) == 1:
+                            cadastro_checks.append({
+                                'Atributo': 'CNAE',
+                                'Status': '✅ IDÊNTICO',
+                                'Quantidade': '1',
+                                'Pontos': 1,
+                                'Avaliação': 'Mesmo ramo'
+                            })
+                            evidencias['cnae'] = True
+                            score_similaridade += 1
+                        elif len(cnaes) > 1:
+                            cadastro_checks.append({
+                                'Atributo': 'CNAE',
+                                'Status': '❌ DIFERENTES',
+                                'Quantidade': str(len(cnaes)),
+                                'Pontos': 0,
+                                'Avaliação': '-'
+                            })
+
+                    # Contador
+                    max_score_possivel += 2
+                    if 'nm_contador' in dossie['cnpjs'].columns:
+                        contadores = dossie['cnpjs']['nm_contador'].dropna().unique()
+                        if len(contadores) == 1 and len(str(contadores[0])) > 0:
+                            cadastro_checks.append({
+                                'Atributo': 'Contador',
+                                'Status': '✅ MESMO',
+                                'Quantidade': '1',
+                                'Pontos': 2,
+                                'Avaliação': 'CRÍTICO - Gestão comum'
+                            })
+                            evidencias['contador'] = True
+                            score_similaridade += 2
+                        elif len(contadores) > 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Contador',
+                                'Status': '❌ DIFERENTES',
+                                'Quantidade': str(len(contadores)),
+                                'Pontos': 0,
+                                'Avaliação': '-'
+                            })
+
+                    # Município
+                    max_score_possivel += 0.5
+                    if 'nm_municipio' in dossie['cnpjs'].columns:
+                        municipios = dossie['cnpjs']['nm_municipio'].dropna().unique()
+                        if len(municipios) == 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Município',
+                                'Status': '✅ MESMO',
+                                'Quantidade': '1',
+                                'Pontos': 0.5,
+                                'Avaliação': 'Indício leve'
+                            })
+                            score_similaridade += 0.5
+                        elif len(municipios) > 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Município',
+                                'Status': '❌ DIFERENTES',
+                                'Quantidade': str(len(municipios)),
+                                'Pontos': 0,
+                                'Avaliação': '-'
+                            })
+
+                    # Regime de Apuração
+                    max_score_possivel += 1
+                    if 'nm_reg_apuracao' in dossie['cnpjs'].columns:
+                        regimes = dossie['cnpjs']['nm_reg_apuracao'].dropna().unique()
+                        if len(regimes) == 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Regime Tributário',
+                                'Status': '✅ MESMO',
+                                'Quantidade': str(regimes[0]),
+                                'Pontos': 1,
+                                'Avaliação': 'Mesmo regime'
+                            })
+                            score_similaridade += 1
+                        elif len(regimes) > 1:
+                            cadastro_checks.append({
+                                'Atributo': 'Regime Tributário',
+                                'Status': '⚠️ MISTO',
+                                'Quantidade': str(len(regimes)),
+                                'Pontos': 0,
+                                'Avaliação': 'Possível planejamento'
+                            })
+
+                    if cadastro_checks:
+                        df_cadastro = pd.DataFrame(cadastro_checks)
+                        st.dataframe(df_cadastro, width='stretch', hide_index=True)
+
+                        pontos_cadastro = df_cadastro['Pontos'].sum()
+                        if pontos_cadastro >= 5:
+                            st.error(f"🔴 CRÍTICO: {pontos_cadastro:.1f} pontos - Forte evidência de grupo econômico")
+                        elif pontos_cadastro >= 3:
+                            st.warning(f"🟡 ALTO: {pontos_cadastro:.1f} pontos - Evidência significativa")
+                        elif pontos_cadastro >= 1:
+                            st.info(f"🟠 MODERADO: {pontos_cadastro:.1f} pontos")
+                        else:
+                            st.success(f"🟢 BAIXO: {pontos_cadastro:.1f} pontos")
+                else:
+                    st.warning("Dados cadastrais insuficientes para análise")
+
+            # ===================================================================
+            # TAB 2: ANÁLISE DE VÍNCULOS SOCIETÁRIOS
+            # ===================================================================
+            with tabs_similaridade[1]:
+                st.subheader("Análise de Vínculos Societários")
+
+                if not dossie['socios'].empty:
+                    socios_checks = []
+
+                    # Sócios compartilhados (já calculados no dossiê)
+                    max_score_possivel += 5
+                    total_socios = len(dossie['socios'])
+
+                    if total_socios > 0:
+                        pontos_socios = min(total_socios * 2, 5)
+
+                        socios_checks.append({
+                            'Indicador': 'Sócios Compartilhados',
+                            'Quantidade': str(total_socios),
+                            'Status': '✅ DETECTADOS',
+                            'Pontos': str(pontos_socios),
+                            'Avaliação': 'CRÍTICO - Vínculos cruzados'
+                        })
+
+                        evidencias['socios_compartilhados'] = True
+                        score_similaridade += pontos_socios
+
+                        # Detalhar os sócios compartilhados
+                        st.write("**Sócios que participam de múltiplos CNPJs:**")
+                        for _, row in dossie['socios'].iterrows():
+                            cpf = row.get('cpf_socio', 'N/A')
+                            qtd = row.get('qtd_empresas', 0)
+                            st.write(f"• **CPF {cpf}**: Presente em {qtd} empresas do grupo")
+                    else:
+                        socios_checks.append({
+                            'Indicador': 'Sócios Compartilhados',
+                            'Quantidade': '0',
+                            'Status': '❌ NÃO DETECTADO',
+                            'Pontos': '0',
+                            'Avaliação': '-'
+                        })
+
+                    df_socios = pd.DataFrame(socios_checks)
+                    for col in df_socios.columns:
+                        df_socios[col] = df_socios[col].astype(str)
+
+                    st.dataframe(df_socios, hide_index=True)
+
+                    # Calcular pontos
+                    pontos_numericos = df_socios[df_socios['Pontos'] != '-']['Pontos'].astype(float)
+                    pontos_socios_total = pontos_numericos.sum() if len(pontos_numericos) > 0 else 0
+
+                    if pontos_socios_total >= 4:
+                        st.error(f"🔴 CRÍTICO: {pontos_socios_total:.1f} pontos - Controle societário compartilhado")
+                    elif pontos_socios_total >= 2:
+                        st.warning(f"🟡 ALTO: {pontos_socios_total:.1f} pontos")
+                    else:
+                        st.info(f"🟢 BAIXO: {pontos_socios_total:.1f} pontos")
+                else:
+                    st.warning("Dados de vínculos societários insuficientes")
+
+            # ===================================================================
+            # TAB 3: ANÁLISE DE RECEITAS (PGDAS + DIME)
+            # ===================================================================
+            with tabs_similaridade[2]:
+                st.subheader("Análise de Faturamento - PGDAS / DIME")
+
+                if 'faturamento' in dossie and not dossie['faturamento'].empty:
+                    df_fat = dossie['faturamento'].copy()
+                    receitas_checks = []
+
+                    # Informação sobre fontes de dados
+                    fontes_disponiveis = df_fat['fonte'].unique().tolist() if 'fonte' in df_fat.columns else ['PGDAS']
+                    st.info(f"**Fontes de dados utilizadas:** {', '.join(fontes_disponiveis)}")
+
+                    # Métricas por fonte
+                    col_f1, col_f2 = st.columns(2)
+                    with col_f1:
+                        cnpjs_pgdas = len(df_fat[df_fat['fonte'] == 'PGDAS']) if 'PGDAS' in fontes_disponiveis else 0
+                        st.metric("CNPJs com PGDAS (Simples)", cnpjs_pgdas)
+                    with col_f2:
+                        cnpjs_dime = len(df_fat[df_fat['fonte'] == 'DIME']) if 'DIME' in fontes_disponiveis else 0
+                        st.metric("CNPJs com DIME (Normal)", cnpjs_dime)
+
+                    # Calcular receita máxima por CNPJ
+                    meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025', 'mar2025', 'fev2025', 'jan2025']
+                    meses_disponiveis = [m for m in meses_cols if m in df_fat.columns]
+
+                    if meses_disponiveis:
+                        # Pegar o último valor não-zero para cada CNPJ
+                        def get_ultimo_valor(row):
+                            for mes in meses_disponiveis:
+                                if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                                    return row[mes]
+                            return 0
+
+                        df_fat['receita_max'] = df_fat.apply(get_ultimo_valor, axis=1)
+                        receitas_por_cnpj = df_fat.groupby('cnpj')['receita_max'].max()
+                        receita_total_grupo = receitas_por_cnpj.sum()
+                        receita_media = receitas_por_cnpj.mean() if len(receitas_por_cnpj) > 0 else 0
+
+                        # Receita somada ultrapassa limite
+                        max_score_possivel += 5
+                        if receita_total_grupo > 4800000:
+                            excesso = receita_total_grupo - 4800000
+                            pontos_receita = 5
+                            receitas_checks.append({
+                                'Indicador': 'Receita Total do Grupo',
+                                'Valor': formatar_moeda(receita_total_grupo),
+                                'Status': '🔴 ACIMA DO LIMITE',
+                                'Excesso': formatar_moeda(excesso),
+                                'Pontos': str(pontos_receita),
+                                'Avaliação': 'CRÍTICO - Fracionamento'
+                            })
+                            evidencias['receita_excesso'] = True
+                            score_similaridade += pontos_receita
+
+                            st.error(f"""
+                            **🔴 ALERTA CRÍTICO - LIMITE ULTRAPASSADO**
+
+                            Receita somada (PGDAS + DIME): **{formatar_moeda(receita_total_grupo)}**
+
+                            Excesso: **{formatar_moeda(excesso)}** ({((excesso/4800000)*100):.1f}% acima do limite)
+                            """)
+                        else:
+                            receitas_checks.append({
+                                'Indicador': 'Receita Total do Grupo',
+                                'Valor': formatar_moeda(receita_total_grupo),
+                                'Status': '✅ DENTRO DO LIMITE',
+                                'Excesso': '-',
+                                'Pontos': '0',
+                                'Avaliação': '-'
+                            })
+
+                        # Distribuição equilibrada
+                        max_score_possivel += 2
+                        if len(receitas_por_cnpj) > 1:
+                            desvio_padrao = receitas_por_cnpj.std()
+                            coef_variacao = (desvio_padrao / receita_media) if receita_media > 0 else 0
+
+                            if coef_variacao < 0.3:
+                                receitas_checks.append({
+                                    'Indicador': 'Distribuição de Receitas',
+                                    'Valor': f"CV: {coef_variacao:.2f}",
+                                    'Status': '⚠️ MUITO UNIFORME',
+                                    'Excesso': '-',
+                                    'Pontos': '2',
+                                    'Avaliação': 'Possível divisão planejada'
+                                })
+                                evidencias['receita_uniforme'] = True
+                                score_similaridade += 2
+                            else:
+                                receitas_checks.append({
+                                    'Indicador': 'Distribuição de Receitas',
+                                    'Valor': f"CV: {coef_variacao:.2f}",
+                                    'Status': '✅ VARIADA',
+                                    'Excesso': '-',
+                                    'Pontos': '0',
+                                    'Avaliação': '-'
+                                })
+
+                        # Análise de regimes mistos
+                        if 'fonte' in df_fat.columns and len(df_fat['fonte'].unique()) > 1:
+                            receitas_checks.append({
+                                'Indicador': 'Regimes Tributários',
+                                'Valor': f"{len(df_fat['fonte'].unique())} regimes",
+                                'Status': '⚠️ MISTO',
+                                'Excesso': '-',
+                                'Pontos': '1',
+                                'Avaliação': 'Possível planejamento tributário'
+                            })
+                            score_similaridade += 1
+
+                        if receitas_checks:
+                            df_receitas = pd.DataFrame(receitas_checks)
+                            for col in df_receitas.columns:
+                                df_receitas[col] = df_receitas[col].astype(str)
+                            st.dataframe(df_receitas, hide_index=True)
+
+                        # Gráfico de distribuição
+                        st.write("**Distribuição de Receitas por CNPJ:**")
+                        df_bar = df_fat.groupby(['cnpj', 'fonte'])['receita_max'].max().reset_index()
+
+                        fig1 = px.bar(
+                            df_bar,
+                            x='cnpj',
+                            y='receita_max',
+                            color='fonte' if 'fonte' in df_bar.columns else None,
+                            labels={'cnpj': 'CNPJ', 'receita_max': 'Receita (R$)', 'fonte': 'Fonte'},
+                            title="Receita Máxima por CNPJ e Fonte",
+                            template=filtros['tema'],
+                            barmode='group'
+                        )
+                        fig1.add_hline(y=4800000, line_dash="dash", line_color="red",
+                                     annotation_text="Limite SN")
+                        st.plotly_chart(fig1, use_container_width=True)
+                else:
+                    st.warning("Dados de receitas insuficientes (PGDAS ou DIME)")
+
+            # ===================================================================
+            # TAB 4: ANÁLISE DE NOTAS FISCAIS
+            # ===================================================================
+            with tabs_similaridade[3]:
+                st.subheader("Compartilhamento em Notas Fiscais")
+
+                if not dossie['inconsistencias'].empty:
+                    nfe_checks = []
+                    df_nfe = dossie['inconsistencias']
+
+                    # Verificar inconsistências detectadas
+                    tipos_incons = {
+                        'ip_transmissao_incons': ('IPs de Transmissão', 3),
+                        'cliente_incons': ('Clientes Comuns', 2),
+                        'fornecedor_incons': ('Fornecedores Comuns', 2),
+                        'codigo_produto_incons': ('Códigos de Produto', 1),
+                        'descricao_produto_incons': ('Descrições de Produto', 1),
+                        'tel_emit_incons': ('Telefones Emitente', 2),
+                        'email_incons': ('E-mails Destinatário', 1),
+                        'end_emit_incons': ('Endereço de Emissão', 2),
+                        'end_dest_incons': ('Endereço de Destino', 2)
+                    }
+
+                    for campo, (label, pontos_max) in tipos_incons.items():
+                        if campo in df_nfe.columns:
+                            max_score_possivel += pontos_max
+                            qtd_incons = len(df_nfe[df_nfe[campo] == 'S'])
+
+                            if qtd_incons > 0:
+                                pontos = min(qtd_incons / 10, pontos_max)
+                                nfe_checks.append({
+                                    'Indicador': label,
+                                    'Quantidade': qtd_incons,
+                                    'Status': '✅ DETECTADOS',
+                                    'Pontos': round(pontos, 1),
+                                    'Avaliação': 'Compartilhamento detectado'
+                                })
+                                evidencias[campo] = True
+                                score_similaridade += pontos
+                            else:
+                                nfe_checks.append({
+                                    'Indicador': label,
+                                    'Quantidade': 0,
+                                    'Status': '❌ NÃO DETECTADOS',
+                                    'Pontos': 0,
+                                    'Avaliação': '-'
+                                })
+
+                    if nfe_checks:
+                        df_nfe_check = pd.DataFrame(nfe_checks)
+                        st.dataframe(df_nfe_check, width='stretch', hide_index=True)
+
+                        pontos_nfe = df_nfe_check['Pontos'].sum()
+                        if pontos_nfe >= 5:
+                            st.error(f"🔴 CRÍTICO: {pontos_nfe:.1f} pontos - Operações fortemente interligadas")
+                        elif pontos_nfe >= 3:
+                            st.warning(f"🟡 ALTO: {pontos_nfe:.1f} pontos")
+                        else:
+                            st.info(f"🟢 MODERADO: {pontos_nfe:.1f} pontos")
+                else:
+                    st.warning("Dados de notas fiscais insuficientes")
+
+            # ===================================================================
+            # TAB 5: ANÁLISE DE CONVÊNIO 115
+            # ===================================================================
+            with tabs_similaridade[4]:
+                st.subheader("Análise Convênio 115 - Identificadores Compartilhados")
+
+                if not dossie['c115'].empty:
+                    c115_checks = []
+                    info_c115 = dossie['c115'].iloc[0]
+
+                    # Verificar dados do C115
+                    max_score_possivel += 3
+                    total_compartilhamentos = info_c115.get('total_compartilhamentos', 0)
+
+                    if pd.notna(total_compartilhamentos) and total_compartilhamentos > 0:
+                        pontos_c115 = min(total_compartilhamentos / 5, 3)
+                        c115_checks.append({
+                            'Indicador': 'Compartilhamentos C115',
+                            'Quantidade': int(total_compartilhamentos),
+                            'Status': '✅ DETECTADOS',
+                            'Pontos': round(pontos_c115, 1),
+                            'Avaliação': 'CRÍTICO - Identificadores compartilhados'
+                        })
+                        evidencias['c115_compartilhamento'] = True
+                        score_similaridade += pontos_c115
+                    else:
+                        c115_checks.append({
+                            'Indicador': 'Compartilhamentos C115',
+                            'Quantidade': 0,
+                            'Status': '❌ NÃO DETECTADOS',
+                            'Pontos': 0,
+                            'Avaliação': '-'
+                        })
+
+                    # Nível de risco C115
+                    nivel_risco = info_c115.get('nivel_risco_grupo_economico', 'N/A')
+                    indice_risco = info_c115.get('indice_risco_grupo_economico', 0)
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Nível de Risco C115", str(nivel_risco))
+                    with col2:
+                        st.metric("Índice de Risco", f"{indice_risco:.4f}" if pd.notna(indice_risco) else "N/A")
+
+                    if c115_checks:
+                        df_c115 = pd.DataFrame(c115_checks)
+                        st.dataframe(df_c115, width='stretch', hide_index=True)
+                else:
+                    st.warning("Dados do Convênio 115 insuficientes")
+
+            # ===================================================================
+            # TAB 6: ANÁLISE DE CONTAS BANCÁRIAS (CCS)
+            # ===================================================================
+            with tabs_similaridade[5]:
+                st.subheader("Análise de Contas Bancárias - CCS")
+
+                if not dossie['ccs_compartilhadas'].empty:
+                    ccs_checks = []
+
+                    # CPFs compartilhando acesso a contas
+                    max_score_possivel += 4
+                    total_cpfs = len(dossie['ccs_compartilhadas'])
+
+                    if total_cpfs > 0:
+                        pontos_ccs = min(total_cpfs * 2, 4)
+                        ccs_checks.append({
+                            'Indicador': 'CPFs com Múltiplas Contas',
+                            'Quantidade': total_cpfs,
+                            'Status': '✅ DETECTADOS',
+                            'Pontos': pontos_ccs,
+                            'Avaliação': 'CRÍTICO - Gestão financeira comum'
+                        })
+                        evidencias['ccs_cpf_compartilhado'] = True
+                        score_similaridade += pontos_ccs
+
+                        st.write("**CPFs com Acesso a Múltiplas Contas:**")
+                        for _, row in dossie['ccs_compartilhadas'].head(10).iterrows():
+                            cpf = row.get('nr_cpf', 'N/A')
+                            qtd = row.get('qtd_cnpjs_usando_conta', 0)
+                            banco = row.get('nm_banco', 'N/A')
+                            st.write(f"• CPF {cpf}: {qtd} CNPJs - Banco: {banco}")
+                    else:
+                        ccs_checks.append({
+                            'Indicador': 'CPFs com Múltiplas Contas',
+                            'Quantidade': 0,
+                            'Status': '❌ NÃO DETECTADOS',
+                            'Pontos': 0,
+                            'Avaliação': '-'
+                        })
+
+                    # Sobreposições de responsáveis
+                    max_score_possivel += 2
+                    if not dossie['ccs_sobreposicoes'].empty:
+                        total_sobreposicoes = len(dossie['ccs_sobreposicoes'])
+                        pontos_sob = min(total_sobreposicoes, 2)
+                        ccs_checks.append({
+                            'Indicador': 'Sobreposições de Responsáveis',
+                            'Quantidade': total_sobreposicoes,
+                            'Status': '✅ DETECTADOS',
+                            'Pontos': pontos_sob,
+                            'Avaliação': 'Gestão simultânea'
+                        })
+                        score_similaridade += pontos_sob
+
+                    if ccs_checks:
+                        df_ccs = pd.DataFrame(ccs_checks)
+                        st.dataframe(df_ccs, width='stretch', hide_index=True)
+
+                        pontos_ccs_total = df_ccs['Pontos'].sum()
+                        if pontos_ccs_total >= 4:
+                            st.error(f"🔴 CRÍTICO: {pontos_ccs_total:.1f} pontos - Contas fortemente relacionadas")
+                        elif pontos_ccs_total >= 2:
+                            st.warning(f"🟡 ALTO: {pontos_ccs_total:.1f} pontos")
+                        else:
+                            st.info(f"🟢 BAIXO: {pontos_ccs_total:.1f} pontos")
+                else:
+                    st.warning("Dados de contas bancárias insuficientes")
+
+            # ===================================================================
+            # TAB 7: ANÁLISE DE FUNCIONÁRIOS
+            # ===================================================================
+            with tabs_similaridade[6]:
+                st.subheader("Análise de Funcionários - RAIS/CAGED")
+
+                if not dossie['funcionarios'].empty:
+                    func_checks = []
+                    info_func = dossie['funcionarios'].iloc[0]
+
+                    total_funcionarios = info_func.get('total_funcionarios', 0)
+                    cnpjs_com_func = info_func.get('cnpjs_com_funcionarios', 0)
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Total de Funcionários", int(total_funcionarios) if pd.notna(total_funcionarios) else 0)
+                    with col2:
+                        st.metric("CNPJs com Funcionários", int(cnpjs_com_func) if pd.notna(cnpjs_com_func) else 0)
+
+                    # Verificar proporção receita vs funcionários
+                    max_score_possivel += 3
+                    if not dossie['principal'].empty and pd.notna(total_funcionarios) and total_funcionarios > 0:
+                        info_principal = dossie['principal'].iloc[0]
+                        receita_max = info_principal.get('valor_max', 0)
+
+                        if pd.notna(receita_max) and receita_max > 0:
+                            receita_por_func = receita_max / (total_funcionarios + 1)
+
+                            if receita_por_func > 500000:
+                                func_checks.append({
+                                    'Indicador': 'Receita por Funcionário',
+                                    'Valor': formatar_moeda(receita_por_func),
+                                    'Status': '⚠️ DESPROPORCIONAL',
+                                    'Pontos': 2,
+                                    'Avaliação': 'Possível terceirização'
+                                })
+                                score_similaridade += 2
+                            else:
+                                func_checks.append({
+                                    'Indicador': 'Receita por Funcionário',
+                                    'Valor': formatar_moeda(receita_por_func),
+                                    'Status': '✅ PROPORCIONAL',
+                                    'Pontos': 0,
+                                    'Avaliação': '-'
+                                })
+
+                    if func_checks:
+                        df_func = pd.DataFrame(func_checks)
+                        st.dataframe(df_func, width='stretch', hide_index=True)
+                    else:
+                        st.success("✅ Proporção receita/funcionários dentro do esperado")
+                else:
+                    st.warning("Dados de funcionários insuficientes")
+
+            # ===================================================================
+            # TAB 8: ANÁLISE DE MEIOS DE PAGAMENTO
+            # ===================================================================
+            with tabs_similaridade[7]:
+                st.subheader("Análise de Meios de Pagamento")
+
+                if not dossie['pagamentos'].empty:
+                    pag_checks = []
+                    info_pag = dossie['pagamentos'].iloc[0]
+
+                    valor_empresas = info_pag.get('valor_meios_pagamento_empresas', 0)
+                    valor_socios = info_pag.get('valor_meios_pagamento_socios', 0)
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Pagamentos Empresas", formatar_moeda(valor_empresas) if pd.notna(valor_empresas) else "R$ 0,00")
+                    with col2:
+                        st.metric("Pagamentos Sócios", formatar_moeda(valor_socios) if pd.notna(valor_socios) else "R$ 0,00")
+
+                    # Verificar se sócios têm meios de pagamento
+                    max_score_possivel += 2
+                    if pd.notna(valor_socios) and valor_socios > 0:
+                        pag_checks.append({
+                            'Indicador': 'Sócios com Meios Pagamento',
+                            'Valor': formatar_moeda(valor_socios),
+                            'Status': '✅ DETECTADOS',
+                            'Pontos': 2,
+                            'Avaliação': 'Gestão financeira comum'
+                        })
+                        evidencias['socios_meios_pagamento'] = True
+                        score_similaridade += 2
+                    else:
+                        pag_checks.append({
+                            'Indicador': 'Sócios com Meios Pagamento',
+                            'Valor': 'R$ 0,00',
+                            'Status': '❌ NÃO DETECTADOS',
+                            'Pontos': 0,
+                            'Avaliação': '-'
+                        })
+
+                    if pag_checks:
+                        df_pag = pd.DataFrame(pag_checks)
+                        st.dataframe(df_pag, width='stretch', hide_index=True)
+                else:
+                    st.warning("Dados de meios de pagamento insuficientes")
+
+            # ===================================================================
+            # TAB 9: SCORE FINAL E CONCLUSÃO
+            # ===================================================================
+            with tabs_similaridade[8]:
+                st.subheader("📊 Score Final de Similaridade")
+
+                # Métricas principais
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Score Total", f"{score_similaridade:.1f}",
+                             help="Pontuação total baseada em todas as evidências")
+
+                with col2:
+                    st.metric("Score Máximo Possível", f"{max_score_possivel:.1f}",
+                             help="Pontuação máxima com base nos dados disponíveis")
+
+                with col3:
+                    percentual = (score_similaridade / max_score_possivel * 100) if max_score_possivel > 0 else 0
+                    st.metric("Percentual", f"{percentual:.1f}%",
+                             help="Percentual do score em relação ao máximo")
+
+                with col4:
+                    total_evidencias = len([v for v in evidencias.values() if v])
+                    st.metric("Evidências", total_evidencias,
+                             help="Número de evidências positivas encontradas")
+
+                # Determinação do nível de risco
+                st.divider()
+
+                if score_similaridade >= 15:
+                    nivel_risco = "🔴 CRÍTICO"
+                    cor_risco = "error"
+                    conclusao = """
+                    **FORTE EVIDÊNCIA DE GRUPO ECONÔMICO**
+
+                    Os CNPJs analisados apresentam múltiplas e graves evidências de pertencerem ao mesmo
+                    grupo econômico. As similaridades detectadas em dados cadastrais, vínculos societários,
+                    padrões operacionais e indicadores fiscais sugerem fortemente operação coordenada e
+                    gestão centralizada.
+
+                    **RECOMENDAÇÃO URGENTE:**
+                    - Análise aprofundada de possível planejamento tributário abusivo
+                    - Verificação de fraude à lei (fracionamento artificial)
+                    - Intimação dos contribuintes para esclarecimentos
+                    - Considerar procedimento fiscal conjunto
+                    """
+                elif score_similaridade >= 10:
+                    nivel_risco = "🟡 ALTO"
+                    cor_risco = "warning"
+                    conclusao = """
+                    **EVIDÊNCIA SIGNIFICATIVA DE GRUPO ECONÔMICO**
+
+                    Os CNPJs apresentam várias características compatíveis com grupo econômico.
+                    As evidências encontradas justificam investigação mais aprofundada.
+
+                    **RECOMENDAÇÃO:**
+                    - Análise complementar com dados adicionais
+                    - Solicitar documentação adicional aos contribuintes
+                    - Monitoramento reforçado nos próximos períodos
+                    - Verificar histórico de alterações cadastrais
+                    """
+                elif score_similaridade >= 5:
+                    nivel_risco = "🟠 MODERADO"
+                    cor_risco = "info"
+                    conclusao = """
+                    **INDÍCIOS MODERADOS DE GRUPO ECONÔMICO**
+
+                    Alguns indícios sugerem possível vinculação entre os CNPJs, mas não são conclusivos.
+                    Recomenda-se monitoramento e coleta de evidências adicionais.
+
+                    **RECOMENDAÇÃO:**
+                    - Monitoramento periódico dos CNPJs
+                    - Atenção a novos indícios que possam surgir
+                    - Cruzamento com outras bases de dados
+                    - Acompanhar evolução das receitas
+                    """
+                else:
+                    nivel_risco = "🟢 BAIXO"
+                    cor_risco = "success"
+                    conclusao = """
+                    **BAIXA EVIDÊNCIA DE GRUPO ECONÔMICO**
+
+                    Com base nos dados analisados, não foram encontradas evidências significativas de que
+                    os CNPJs pertençam ao mesmo grupo econômico. As similaridades detectadas podem ser
+                    coincidências ou características comuns do setor.
+
+                    **RECOMENDAÇÃO:**
+                    - Monitoramento de rotina conforme procedimentos padrão
+                    - Atenção caso surjam novos indícios futuramente
+                    """
+
+                # Exibir nível de risco
+                if cor_risco == "error":
+                    st.error(f"**Nível de Risco: {nivel_risco}**")
+                elif cor_risco == "warning":
+                    st.warning(f"**Nível de Risco: {nivel_risco}**")
+                elif cor_risco == "info":
+                    st.info(f"**Nível de Risco: {nivel_risco}**")
+                else:
+                    st.success(f"**Nível de Risco: {nivel_risco}**")
+
+                # Conclusão detalhada
+                st.markdown("### 🎯 Conclusão da Análise")
+                st.markdown(conclusao)
+
+                # Tabela resumo de evidências
+                if evidencias:
+                    st.markdown("### 📋 Resumo das Evidências Encontradas")
+
+                    categorias_evidencias = {
+                        'Cadastrais': ['razao_social', 'fantasia', 'cnae', 'contador'],
+                        'Societárias': ['socios_compartilhados'],
+                        'Fiscais': ['receita_excesso', 'receita_uniforme'],
+                        'Operacionais NFe': ['ip_transmissao_incons', 'cliente_incons', 'fornecedor_incons', 'codigo_produto_incons', 'tel_emit_incons', 'email_incons', 'end_emit_incons', 'end_dest_incons'],
+                        'C115': ['c115_compartilhamento'],
+                        'Financeiras': ['ccs_cpf_compartilhado', 'socios_meios_pagamento']
+                    }
+
+                    resumo_evidencias = []
+                    for categoria, chaves in categorias_evidencias.items():
+                        evidencias_categoria = [k for k in chaves if evidencias.get(k, False)]
+                        if evidencias_categoria:
+                            resumo_evidencias.append({
+                                'Categoria': categoria,
+                                'Quantidade': len(evidencias_categoria),
+                                'Evidências': ', '.join([k.replace('_', ' ').title() for k in evidencias_categoria])
+                            })
+
+                    if resumo_evidencias:
+                        df_resumo = pd.DataFrame(resumo_evidencias)
+                        st.dataframe(df_resumo, width='stretch', hide_index=True)
+
+                # Gráfico de distribuição de pontos
+                st.markdown("### 📈 Distribuição de Pontos por Categoria")
+
+                categorias_pontos = {
+                    'Cadastro': sum([2 if evidencias.get('razao_social') else 0,
+                                    1 if evidencias.get('fantasia') else 0,
+                                    1 if evidencias.get('cnae') else 0,
+                                    2 if evidencias.get('contador') else 0]),
+                    'Sócios': 5 if evidencias.get('socios_compartilhados') else 0,
+                    'Receitas': sum([5 if evidencias.get('receita_excesso') else 0,
+                                    2 if evidencias.get('receita_uniforme') else 0]),
+                    'NFe': sum([3 if evidencias.get('ip_transmissao_incons') else 0,
+                               2 if evidencias.get('cliente_incons') else 0,
+                               2 if evidencias.get('fornecedor_incons') else 0,
+                               1 if evidencias.get('codigo_produto_incons') else 0]),
+                    'C115': 3 if evidencias.get('c115_compartilhamento') else 0,
+                    'CCS': 4 if evidencias.get('ccs_cpf_compartilhado') else 0
+                }
+
+                df_categorias = pd.DataFrame([
+                    {'Categoria': k, 'Pontos': v}
+                    for k, v in categorias_pontos.items() if v > 0
+                ])
+
+                if not df_categorias.empty:
+                    fig = px.bar(df_categorias, x='Categoria', y='Pontos',
+                                title="Pontos por Categoria de Evidência",
+                                template=filtros['tema'],
+                                color='Pontos',
+                                color_continuous_scale='Reds')
+                    st.plotly_chart(fig, use_container_width=True)
+
+    # =========================================================================
+    # TAB 12: EXPORTAÇÃO
+    # =========================================================================
+    with tab12:
         st.subheader("Exportação de Relatório")
         
         st.write("""
