@@ -82,7 +82,7 @@ st.set_page_config(
     page_title="GEI - Monitoramento Fiscal",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # CSS Customizado
@@ -137,6 +137,39 @@ st.markdown("""
         padding: 1rem;
         border-radius: 0.5rem;
         border-left: 4px solid #1f77b4;
+    }
+
+    /* =========================================================================
+       SIDEBAR SEMPRE COLAPSADO - EXPANDE AO PASSAR O MOUSE
+       ========================================================================= */
+
+    /* Sidebar sempre colapsado por padrão */
+    section[data-testid="stSidebar"] {
+        width: 0px !important;
+        min-width: 0px !important;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out, width 0.3s ease-in-out;
+    }
+
+    /* Expande ao passar o mouse ou focar */
+    section[data-testid="stSidebar"]:hover,
+    section[data-testid="stSidebar"]:focus-within {
+        width: 300px !important;
+        min-width: 300px !important;
+        transform: translateX(0);
+    }
+
+    /* Indicador visual para expandir (hambúrguer) */
+    section[data-testid="stSidebar"]::before {
+        content: "☰";
+        position: absolute;
+        right: -30px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 24px;
+        color: #1565C0;
+        cursor: pointer;
+        z-index: 1000;
     }
 </style>
 """, unsafe_allow_html=True)
