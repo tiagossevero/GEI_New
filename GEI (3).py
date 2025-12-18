@@ -583,8 +583,7 @@ def carregar_dossie_completo(_engine, num_grupo):
                 jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
                 jul2024, ago2024, set2024, out2024, nov2024, dez2024,
                 jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
-                jul2025, ago2025, set2025,
-                vl_icms_12m_total
+                jul2025, ago2025, set2025
             FROM gessimples.gei_nf3e
             WHERE cnpj IN ('{cnpjs_str}')
             """
@@ -594,7 +593,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nf3e_metricas = f"""
             SELECT *
             FROM gessimples.gei_nf3e_metricas_grupo
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             """
             try:
                 dossie['nf3e_metricas'] = pd.read_sql(query_nf3e_metricas, _engine)
@@ -605,7 +604,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nf3e_det = f"""
             SELECT *
             FROM gessimples.gei_nf3e_detalhado
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             ORDER BY ano_emissao DESC, mes_emissao DESC
             """
             try:
@@ -639,8 +638,7 @@ def carregar_dossie_completo(_engine, num_grupo):
                 jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
                 jul2024, ago2024, set2024, out2024, nov2024, dez2024,
                 jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
-                jul2025, ago2025, set2025,
-                vl_icms_12m_total
+                jul2025, ago2025, set2025
             FROM gessimples.gei_nfcom
             WHERE cnpj IN ('{cnpjs_str}')
             """
@@ -650,7 +648,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nfcom_metricas = f"""
             SELECT *
             FROM gessimples.gei_nfcom_metricas_grupo
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             """
             try:
                 dossie['nfcom_metricas'] = pd.read_sql(query_nfcom_metricas, _engine)
@@ -661,7 +659,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nfcom_det = f"""
             SELECT *
             FROM gessimples.gei_nfcom_detalhado
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             ORDER BY ano_emissao DESC, mes_emissao DESC
             """
             try:
@@ -673,7 +671,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nfcom_op = f"""
             SELECT *
             FROM gessimples.gei_nfcom_por_operadora
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             ORDER BY vl_total DESC
             """
             try:
@@ -7826,14 +7824,12 @@ def dossie_grupo(engine, dados, filtros):
             # Métricas do grupo
             if 'nf3e_metricas' in dossie and not dossie['nf3e_metricas'].empty:
                 metricas = dossie['nf3e_metricas'].iloc[0]
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Empresas Consumidoras", int(metricas.get('qt_empresas_consumidoras', 0)))
                 with col2:
                     st.metric("Valor Total Energia", formatar_moeda(metricas.get('vl_energia_grupo', 0)))
                 with col3:
-                    st.metric("ICMS Total", formatar_moeda(metricas.get('vl_icms_grupo', 0)))
-                with col4:
                     st.metric("Qtd. Notas", int(metricas.get('qt_notas_grupo', 0)))
 
                 st.divider()
@@ -7854,24 +7850,20 @@ def dossie_grupo(engine, dados, filtros):
             df_nf3e['ultimo_valor_12m'] = df_nf3e.apply(get_ultimo_valor_energia, axis=1)
 
             # Resumo
-            df_resumo_energia = df_nf3e[['cnpj', 'ultimo_valor_12m', 'vl_icms_12m_total']].copy()
-            df_resumo_energia.columns = ['CNPJ', 'Energia 12m (R$)', 'ICMS 12m (R$)']
+            df_resumo_energia = df_nf3e[['cnpj', 'ultimo_valor_12m']].copy()
+            df_resumo_energia.columns = ['CNPJ', 'Energia 12m (R$)']
             df_resumo_energia['Energia Formatada'] = df_resumo_energia['Energia 12m (R$)'].apply(formatar_moeda)
-            df_resumo_energia['ICMS Formatado'] = df_resumo_energia['ICMS 12m (R$)'].apply(formatar_moeda)
 
             total_energia = df_resumo_energia['Energia 12m (R$)'].sum()
-            total_icms = df_resumo_energia['ICMS 12m (R$)'].sum()
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 st.metric("Total CNPJs com Energia", len(df_resumo_energia))
             with col2:
                 st.metric("Consumo Total (soma)", formatar_moeda(total_energia))
-            with col3:
-                st.metric("ICMS Total", formatar_moeda(total_icms))
 
             st.dataframe(
-                df_resumo_energia.sort_values('Energia 12m (R$)', ascending=False)[['CNPJ', 'Energia Formatada', 'ICMS Formatado']],
+                df_resumo_energia.sort_values('Energia 12m (R$)', ascending=False)[['CNPJ', 'Energia Formatada']],
                 hide_index=True,
                 use_container_width=True
             )
@@ -7924,9 +7916,8 @@ def dossie_grupo(engine, dados, filtros):
                 st.write("**Detalhamento Mensal:**")
                 df_det = dossie['nf3e_detalhado'].copy()
                 df_det['Energia Mensal'] = df_det['vl_energia_mensal'].apply(formatar_moeda)
-                df_det['ICMS Mensal'] = df_det['vl_icms_mensal'].apply(formatar_moeda)
                 st.dataframe(
-                    df_det[['cnpj', 'ano_emissao', 'mes_emissao', 'Energia Mensal', 'ICMS Mensal', 'qt_notas', 'qt_fornecedores']].rename(
+                    df_det[['cnpj', 'ano_emissao', 'mes_emissao', 'Energia Mensal', 'qt_notas', 'qt_fornecedores']].rename(
                         columns={'cnpj': 'CNPJ', 'ano_emissao': 'Ano', 'mes_emissao': 'Mês', 'qt_notas': 'Qtd. Notas', 'qt_fornecedores': 'Fornecedores'}
                     ),
                     hide_index=True,
@@ -7948,14 +7939,12 @@ def dossie_grupo(engine, dados, filtros):
             # Métricas do grupo
             if 'nfcom_metricas' in dossie and not dossie['nfcom_metricas'].empty:
                 metricas = dossie['nfcom_metricas'].iloc[0]
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Empresas Consumidoras", int(metricas.get('qt_empresas_consumidoras', 0)))
                 with col2:
                     st.metric("Valor Total Telecom", formatar_moeda(metricas.get('vl_telecom_grupo', 0)))
                 with col3:
-                    st.metric("ICMS Total", formatar_moeda(metricas.get('vl_icms_grupo', 0)))
-                with col4:
                     st.metric("Qtd. Notas", int(metricas.get('qt_notas_grupo', 0)))
 
                 st.divider()
@@ -7979,24 +7968,20 @@ def dossie_grupo(engine, dados, filtros):
                 df_nfcom['ultimo_valor_12m'] = df_nfcom.apply(get_ultimo_valor_telecom, axis=1)
 
                 # Resumo
-                df_resumo_telecom = df_nfcom[['cnpj', 'ultimo_valor_12m', 'vl_icms_12m_total']].copy()
-                df_resumo_telecom.columns = ['CNPJ', 'Telecom 12m (R$)', 'ICMS 12m (R$)']
+                df_resumo_telecom = df_nfcom[['cnpj', 'ultimo_valor_12m']].copy()
+                df_resumo_telecom.columns = ['CNPJ', 'Telecom 12m (R$)']
                 df_resumo_telecom['Telecom Formatada'] = df_resumo_telecom['Telecom 12m (R$)'].apply(formatar_moeda)
-                df_resumo_telecom['ICMS Formatado'] = df_resumo_telecom['ICMS 12m (R$)'].apply(formatar_moeda)
 
                 total_telecom = df_resumo_telecom['Telecom 12m (R$)'].sum()
-                total_icms_telecom = df_resumo_telecom['ICMS 12m (R$)'].sum()
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Total CNPJs com Telecom", len(df_resumo_telecom))
                 with col2:
                     st.metric("Consumo Total (soma)", formatar_moeda(total_telecom))
-                with col3:
-                    st.metric("ICMS Total", formatar_moeda(total_icms_telecom))
 
                 st.dataframe(
-                    df_resumo_telecom.sort_values('Telecom 12m (R$)', ascending=False)[['CNPJ', 'Telecom Formatada', 'ICMS Formatado']],
+                    df_resumo_telecom.sort_values('Telecom 12m (R$)', ascending=False)[['CNPJ', 'Telecom Formatada']],
                     hide_index=True,
                     use_container_width=True
                 )
@@ -8082,9 +8067,8 @@ def dossie_grupo(engine, dados, filtros):
                     st.write("**Detalhamento Mensal:**")
                     df_det = dossie['nfcom_detalhado'].copy()
                     df_det['Telecom Mensal'] = df_det['vl_telecom_mensal'].apply(formatar_moeda)
-                    df_det['ICMS Mensal'] = df_det['vl_icms_mensal'].apply(formatar_moeda)
                     st.dataframe(
-                        df_det[['cnpj', 'ano_emissao', 'mes_emissao', 'Telecom Mensal', 'ICMS Mensal', 'qt_notas', 'qt_operadoras']].rename(
+                        df_det[['cnpj', 'ano_emissao', 'mes_emissao', 'Telecom Mensal', 'qt_notas', 'qt_operadoras']].rename(
                             columns={'cnpj': 'CNPJ', 'ano_emissao': 'Ano', 'mes_emissao': 'Mês', 'qt_notas': 'Qtd. Notas', 'qt_operadoras': 'Operadoras'}
                         ),
                         hide_index=True,

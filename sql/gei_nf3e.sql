@@ -22,20 +22,18 @@ WITH base AS (
       procnf3e.nf3e.infnf3e.dest.cpf
     )), '[^0-9]', '') AS cnpj_dest,
     CAST(ano_emissao AS INT) * 100 + CAST(mes_emissao AS INT) AS nu_per_ref,
-    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vnf AS DOUBLE), 0) AS vl_nota,
-    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vicms AS DOUBLE), 0) AS vl_icms
+    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vnf AS DOUBLE), 0) AS vl_nota
   FROM nf3e.nf3e
   WHERE ano_emissao >= 2020
     AND ano_emissao <= 2025
-    AND procnf3e.nf3e.infnf3e.dest.cnpj IS NOT NULL
-    OR procnf3e.nf3e.infnf3e.dest.cpf IS NOT NULL
+    AND (procnf3e.nf3e.infnf3e.dest.cnpj IS NOT NULL
+         OR procnf3e.nf3e.infnf3e.dest.cpf IS NOT NULL)
 ),
 agregado AS (
   SELECT
     cnpj_dest,
     nu_per_ref,
     SUM(vl_nota) AS vl_energia_mensal,
-    SUM(vl_icms) AS vl_icms_mensal,
     COUNT(*) AS qt_notas
   FROM base
   WHERE LENGTH(cnpj_dest) >= 11
@@ -46,18 +44,12 @@ acumulado AS (
     cnpj_dest,
     nu_per_ref,
     vl_energia_mensal,
-    vl_icms_mensal,
     qt_notas,
     SUM(vl_energia_mensal) OVER (
       PARTITION BY cnpj_dest
       ORDER BY nu_per_ref
       ROWS BETWEEN 11 PRECEDING AND CURRENT ROW
-    ) AS vl_energia_12m,
-    SUM(vl_icms_mensal) OVER (
-      PARTITION BY cnpj_dest
-      ORDER BY nu_per_ref
-      ROWS BETWEEN 11 PRECEDING AND CURRENT ROW
-    ) AS vl_icms_12m
+    ) AS vl_energia_12m
   FROM agregado
 )
 SELECT
@@ -128,10 +120,7 @@ SELECT
   MAX(CASE WHEN a.nu_per_ref = 202506 THEN a.vl_energia_12m ELSE 0 END) AS jun2025,
   MAX(CASE WHEN a.nu_per_ref = 202507 THEN a.vl_energia_12m ELSE 0 END) AS jul2025,
   MAX(CASE WHEN a.nu_per_ref = 202508 THEN a.vl_energia_12m ELSE 0 END) AS ago2025,
-  MAX(CASE WHEN a.nu_per_ref = 202509 THEN a.vl_energia_12m ELSE 0 END) AS set2025,
-
-  -- Totais ICMS 12 meses (ultimo periodo disponivel)
-  MAX(a.vl_icms_12m) AS vl_icms_12m_total
+  MAX(CASE WHEN a.nu_per_ref = 202509 THEN a.vl_energia_12m ELSE 0 END) AS set2025
 
 FROM acumulado a
 JOIN gessimples.gei_cnpj gc ON a.cnpj_dest = gc.cnpj
@@ -155,10 +144,7 @@ WITH base AS (
     )), '[^0-9]', '') AS cnpj_dest,
     REGEXP_REPLACE(TRIM(procnf3e.nf3e.infnf3e.emit.cnpj), '[^0-9]', '') AS cnpj_emit,
     CAST(ano_emissao AS INT) * 100 + CAST(mes_emissao AS INT) AS nu_per_ref,
-    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vnf AS DOUBLE), 0) AS vl_nota,
-    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vicms AS DOUBLE), 0) AS vl_icms,
-    procnf3e.nf3e.infnf3e.ide.tpamb AS tp_ambiente,
-    procnf3e.nf3e.infnf3e.ide.finnf3e AS finalidade
+    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vnf AS DOUBLE), 0) AS vl_nota
   FROM nf3e.nf3e
   WHERE ano_emissao >= 2023
     AND (procnf3e.nf3e.infnf3e.dest.cnpj IS NOT NULL
@@ -167,9 +153,8 @@ WITH base AS (
 por_cnpj AS (
   SELECT
     b.cnpj_dest,
-    gc.grupo_id,
+    gc.num_grupo,
     SUM(b.vl_nota) AS vl_total_energia,
-    SUM(b.vl_icms) AS vl_total_icms,
     COUNT(*) AS qt_notas,
     COUNT(DISTINCT b.cnpj_emit) AS qt_fornecedores,
     COUNT(DISTINCT b.nu_per_ref) AS qt_meses_consumo,
@@ -179,20 +164,19 @@ por_cnpj AS (
   FROM base b
   JOIN gessimples.gei_cnpj gc ON b.cnpj_dest = gc.cnpj
   WHERE LENGTH(b.cnpj_dest) >= 11
-  GROUP BY b.cnpj_dest, gc.grupo_id
+  GROUP BY b.cnpj_dest, gc.num_grupo
 )
 SELECT
-  grupo_id,
+  num_grupo,
   COUNT(DISTINCT cnpj_dest) AS qt_empresas_consumidoras,
   SUM(vl_total_energia) AS vl_energia_grupo,
-  SUM(vl_total_icms) AS vl_icms_grupo,
   SUM(qt_notas) AS qt_notas_grupo,
   SUM(qt_fornecedores) AS qt_fornecedores_grupo,
   AVG(vl_medio_nota) AS vl_medio_nota_grupo,
   MAX(vl_max_nota) AS vl_max_nota_grupo,
   AVG(qt_meses_consumo) AS media_meses_consumo
 FROM por_cnpj
-GROUP BY grupo_id;
+GROUP BY num_grupo;
 
 COMPUTE STATS gessimples.gei_nf3e_metricas_grupo;
 
@@ -212,8 +196,7 @@ WITH base AS (
     REGEXP_REPLACE(TRIM(procnf3e.nf3e.infnf3e.emit.cnpj), '[^0-9]', '') AS cnpj_emit,
     ano_emissao,
     mes_emissao,
-    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vnf AS DOUBLE), 0) AS vl_nota,
-    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vicms AS DOUBLE), 0) AS vl_icms
+    COALESCE(CAST(procnf3e.nf3e.infnf3e.total.vnf AS DOUBLE), 0) AS vl_nota
   FROM nf3e.nf3e
   WHERE ano_emissao >= 2023
     AND (procnf3e.nf3e.infnf3e.dest.cnpj IS NOT NULL
@@ -221,16 +204,15 @@ WITH base AS (
 )
 SELECT
   b.cnpj_dest AS cnpj,
-  gc.grupo_id,
+  gc.num_grupo,
   b.ano_emissao,
   b.mes_emissao,
   SUM(b.vl_nota) AS vl_energia_mensal,
-  SUM(b.vl_icms) AS vl_icms_mensal,
   COUNT(*) AS qt_notas,
   COUNT(DISTINCT b.cnpj_emit) AS qt_fornecedores
 FROM base b
 JOIN gessimples.gei_cnpj gc ON b.cnpj_dest = gc.cnpj
 WHERE LENGTH(b.cnpj_dest) >= 11
-GROUP BY b.cnpj_dest, gc.grupo_id, b.ano_emissao, b.mes_emissao;
+GROUP BY b.cnpj_dest, gc.num_grupo, b.ano_emissao, b.mes_emissao;
 
 COMPUTE STATS gessimples.gei_nf3e_detalhado;
