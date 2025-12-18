@@ -232,7 +232,10 @@ def carregar_todos_os_dados(_engine):
         'pagamentos_metricas': ('gei_pagamentos_metricas_grupo', None),
         'c115_metricas': ('gei_c115_metricas_grupos', None),
         'ccs_metricas': ('gei_ccs_metricas_grupo', None),
-        'ccs_ranking': ('gei_ccs_ranking_risco', None)
+        'ccs_ranking': ('gei_ccs_ranking_risco', None),
+        # Novas tabelas de Energia Elétrica (NF3e) e Telecomunicações (NFCom)
+        'nf3e_metricas': ('gei_nf3e_metricas_grupo', None),
+        'nfcom_metricas': ('gei_nfcom_metricas_grupo', None)
     }
     
     st.sidebar.write("**Status do Carregamento:**")
@@ -878,8 +881,22 @@ def analise_machine_learning(engine, dados, filtros):
                 COALESCE(perc_end_dest, 0) as perc_end_dest_incons,
                 COALESCE(perc_descricao_produto, 0) as perc_descricao_produto_incons,
                 COALESCE(perc_ip_transmissao, 0) as perc_ip_transmissao_incons,
-                COALESCE(distinct_nfe, 0) as total_nfe_analisadas
-                
+                COALESCE(distinct_nfe, 0) as total_nfe_analisadas,
+
+                -- Energia Elétrica (NF3e)
+                COALESCE(nf3e_qt_empresas, 0) as nf3e_empresas,
+                COALESCE(nf3e_vl_total, 0) as nf3e_consumo_total,
+                COALESCE(nf3e_perc_energia_faturamento, 0) as nf3e_perc_faturamento,
+
+                -- Telecomunicações (NFCom)
+                COALESCE(nfcom_qt_empresas, 0) as nfcom_empresas,
+                COALESCE(nfcom_vl_total, 0) as nfcom_consumo_total,
+                COALESCE(nfcom_perc_telecom_faturamento, 0) as nfcom_perc_faturamento,
+
+                -- Utilidades Combinadas
+                COALESCE(vl_utilidades_total, 0) as utilidades_total,
+                COALESCE(perc_utilidades_faturamento, 0) as utilidades_perc_faturamento
+
             FROM gessimples.gei_percent
             WHERE qntd_cnpj > 1
             ORDER BY score_final_ccs DESC
@@ -3531,9 +3548,9 @@ def analise_pontual(engine, dados, filtros):
             
             # 9. INDÍCIOS
             try:
-                status_text.text("9/10 - Verificando indícios fiscais...")
-                progress_bar.progress(90)
-                
+                status_text.text("9/12 - Verificando indícios fiscais...")
+                progress_bar.progress(75)
+
                 query_indicios = f"""
                 SELECT
                     t.nu_cpf_cnpj as cnpj,
@@ -3547,10 +3564,50 @@ def analise_pontual(engine, dados, filtros):
             except Exception as e:
                 st.warning(f"Erro ao buscar indícios: {e}")
                 st.session_state.analise_resultados['indicios'] = pd.DataFrame()
-            
-            # 10. GRUPOS EXISTENTES
+
+            # 10. ENERGIA ELÉTRICA (NF3e)
             try:
-                status_text.text("10/10 - Verificando grupos existentes...")
+                status_text.text("10/12 - Verificando consumo de energia elétrica (NF3e)...")
+                progress_bar.progress(83)
+
+                query_nf3e = f"""
+                SELECT
+                    cnpj,
+                    jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
+                    jul2024, ago2024, set2024, out2024, nov2024, dez2024,
+                    jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                    jul2025, ago2025, set2025
+                FROM gessimples.gei_nf3e
+                WHERE cnpj IN ('{cnpjs_str}')
+                """
+                st.session_state.analise_resultados['nf3e'] = pd.read_sql(query_nf3e, engine)
+            except Exception as e:
+                st.warning(f"Erro ao buscar NF3e: {e}")
+                st.session_state.analise_resultados['nf3e'] = pd.DataFrame()
+
+            # 11. TELECOMUNICAÇÕES (NFCom)
+            try:
+                status_text.text("11/12 - Verificando consumo de telecomunicações (NFCom)...")
+                progress_bar.progress(92)
+
+                query_nfcom = f"""
+                SELECT
+                    cnpj,
+                    jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
+                    jul2024, ago2024, set2024, out2024, nov2024, dez2024,
+                    jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                    jul2025, ago2025, set2025
+                FROM gessimples.gei_nfcom
+                WHERE cnpj IN ('{cnpjs_str}')
+                """
+                st.session_state.analise_resultados['nfcom'] = pd.read_sql(query_nfcom, engine)
+            except Exception as e:
+                st.warning(f"Erro ao buscar NFCom: {e}")
+                st.session_state.analise_resultados['nfcom'] = pd.DataFrame()
+
+            # 12. GRUPOS EXISTENTES
+            try:
+                status_text.text("12/12 - Verificando grupos existentes...")
                 progress_bar.progress(100)
                 
                 query_grupos = f"""
@@ -3607,6 +3664,8 @@ def analise_pontual(engine, dados, filtros):
             "Funcionários",
             "Pagamentos",
             "Indícios",
+            "Energia Elétrica",
+            "Telecomunicações",
             "Grupos Existentes"
         ])
         
@@ -3900,9 +3959,81 @@ def analise_pontual(engine, dados, filtros):
                 st.dataframe(resultados['indicios'], width='stretch', hide_index=True)
             else:
                 st.success("✅ Nenhum indício fiscal encontrado.")
-        
-        # TAB 10: GRUPOS EXISTENTES
+
+        # TAB 10: ENERGIA ELÉTRICA (NF3e)
         with tabs[9]:
+            if 'nf3e' in resultados and not resultados['nf3e'].empty:
+                st.subheader(f"Consumo de Energia Elétrica ({len(resultados['nf3e'])} CNPJs)")
+
+                df_nf3e = resultados['nf3e']
+
+                # Calcular último valor disponível
+                meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025',
+                             'mar2025', 'fev2025', 'jan2025', 'dez2024', 'nov2024', 'out2024']
+
+                def get_ultimo_valor_energia(row):
+                    for mes in meses_cols:
+                        if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                            return row[mes]
+                    return 0
+
+                df_nf3e['consumo_12m'] = df_nf3e.apply(get_ultimo_valor_energia, axis=1)
+
+                # Métricas
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("CNPJs com Consumo", len(df_nf3e[df_nf3e['consumo_12m'] > 0]))
+                with col2:
+                    st.metric("Consumo Total (12m)", formatar_moeda(df_nf3e['consumo_12m'].sum()))
+                with col3:
+                    st.metric("Consumo Médio", formatar_moeda(df_nf3e[df_nf3e['consumo_12m'] > 0]['consumo_12m'].mean()))
+
+                # Tabela
+                df_display = df_nf3e[['cnpj', 'consumo_12m']].copy()
+                df_display['consumo_12m'] = df_display['consumo_12m'].apply(formatar_moeda)
+                df_display.columns = ['CNPJ', 'Consumo 12 meses']
+                st.dataframe(df_display, hide_index=True, use_container_width=True)
+            else:
+                st.info("Nenhum dado de energia elétrica encontrado para os CNPJs informados.")
+
+        # TAB 11: TELECOMUNICAÇÕES (NFCom)
+        with tabs[10]:
+            if 'nfcom' in resultados and not resultados['nfcom'].empty:
+                st.subheader(f"Consumo de Telecomunicações ({len(resultados['nfcom'])} CNPJs)")
+
+                df_nfcom = resultados['nfcom']
+
+                # Calcular último valor disponível
+                meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025',
+                             'mar2025', 'fev2025', 'jan2025', 'dez2024', 'nov2024', 'out2024']
+
+                def get_ultimo_valor_telecom(row):
+                    for mes in meses_cols:
+                        if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                            return row[mes]
+                    return 0
+
+                df_nfcom['consumo_12m'] = df_nfcom.apply(get_ultimo_valor_telecom, axis=1)
+
+                # Métricas
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("CNPJs com Consumo", len(df_nfcom[df_nfcom['consumo_12m'] > 0]))
+                with col2:
+                    st.metric("Consumo Total (12m)", formatar_moeda(df_nfcom['consumo_12m'].sum()))
+                with col3:
+                    st.metric("Consumo Médio", formatar_moeda(df_nfcom[df_nfcom['consumo_12m'] > 0]['consumo_12m'].mean()))
+
+                # Tabela
+                df_display = df_nfcom[['cnpj', 'consumo_12m']].copy()
+                df_display['consumo_12m'] = df_display['consumo_12m'].apply(formatar_moeda)
+                df_display.columns = ['CNPJ', 'Consumo 12 meses']
+                st.dataframe(df_display, hide_index=True, use_container_width=True)
+            else:
+                st.info("Nenhum dado de telecomunicações encontrado para os CNPJs informados.")
+
+        # TAB 12: GRUPOS EXISTENTES
+        with tabs[11]:
             if not resultados['grupos_existentes'].empty:
                 st.warning(f"⚠️ {len(resultados['grupos_existentes'])} CNPJs já estão cadastrados em grupos GEI!")
                 
@@ -6700,6 +6831,449 @@ def menu_financeiro(engine, dados, filtros):
             st.error(f"ATENÇÃO: Receita acima do limite do Simples Nacional (R$ 4,8M)")
             excesso = info_grupo['valor_max'] - 4800000
             st.write(f"**Excesso sobre o limite:** {formatar_moeda(excesso)}")
+
+
+# =============================================================================
+# MENU ENERGIA ELÉTRICA (NF3e)
+# =============================================================================
+def menu_energia(engine, dados, filtros):
+    """Análise de consumo de energia elétrica por grupos econômicos"""
+    st.markdown("<h1 class='main-header'>Energia Elétrica (NF3e)</h1>", unsafe_allow_html=True)
+
+    st.info("Análise do consumo de energia elétrica dos grupos econômicos baseada nas Notas Fiscais de Energia (NF3e).")
+
+    df = aplicar_filtros(dados['percent'], filtros)
+
+    if df.empty:
+        st.warning("Nenhum dado encontrado.")
+        return
+
+    # Verificar se os campos NF3e existem no percent
+    tem_nf3e = 'nf3e_vl_total' in df.columns
+
+    # Tabs para organizar
+    tab1, tab2, tab3 = st.tabs(["Panorama Geral", "Ranking", "Análise Detalhada"])
+
+    with tab1:
+        st.subheader("Panorama do Consumo de Energia Elétrica")
+
+        if tem_nf3e:
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                grupos_com_energia = len(df[df['nf3e_vl_total'] > 0])
+                st.metric("Grupos com Consumo", f"{grupos_com_energia:,}")
+
+            with col2:
+                total_energia = df['nf3e_vl_total'].sum()
+                st.metric("Consumo Total", formatar_moeda(total_energia))
+
+            with col3:
+                media_energia = df[df['nf3e_vl_total'] > 0]['nf3e_vl_total'].mean()
+                st.metric("Média por Grupo", formatar_moeda(media_energia) if pd.notna(media_energia) else "R$ 0,00")
+
+            with col4:
+                if 'nf3e_perc_energia_faturamento' in df.columns:
+                    media_perc = df[df['nf3e_perc_energia_faturamento'] > 0]['nf3e_perc_energia_faturamento'].mean()
+                    st.metric("% Médio s/ Faturamento", f"{media_perc:.2f}%" if pd.notna(media_perc) else "N/A")
+
+            st.divider()
+
+            # Gráficos
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Distribuição por faixa de consumo
+                df_energia = df[df['nf3e_vl_total'] > 0].copy()
+                df_energia['faixa'] = pd.cut(df_energia['nf3e_vl_total'],
+                                             bins=[0, 10000, 50000, 100000, 500000, float('inf')],
+                                             labels=['0-10k', '10k-50k', '50k-100k', '100k-500k', '>500k'])
+                fig = px.pie(df_energia['faixa'].value_counts().reset_index(),
+                            values='count', names='faixa',
+                            title="Distribuição por Faixa de Consumo",
+                            template=filtros['tema'])
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                # Relação energia vs faturamento
+                if 'valor_max' in df.columns:
+                    df_scatter = df[(df['nf3e_vl_total'] > 0) & (df['valor_max'] > 0)].head(500)
+                    fig = px.scatter(df_scatter, x='valor_max', y='nf3e_vl_total',
+                                    title="Energia vs Faturamento",
+                                    labels={'valor_max': 'Faturamento (R$)', 'nf3e_vl_total': 'Energia (R$)'},
+                                    template=filtros['tema'],
+                                    hover_data=['num_grupo'])
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            # Carregar diretamente da tabela de métricas
+            if 'nf3e_metricas' in dados and not dados['nf3e_metricas'].empty:
+                df_nf3e = dados['nf3e_metricas']
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Grupos com Consumo", f"{len(df_nf3e):,}")
+                with col2:
+                    st.metric("Consumo Total", formatar_moeda(df_nf3e['vl_energia_grupo'].sum()))
+                with col3:
+                    st.metric("Média por Grupo", formatar_moeda(df_nf3e['vl_energia_grupo'].mean()))
+                with col4:
+                    st.metric("Empresas Consumidoras", f"{df_nf3e['qt_empresas_consumidoras'].sum():,}")
+            else:
+                st.warning("Dados de NF3e não disponíveis. Execute as queries de criação das tabelas.")
+
+    with tab2:
+        st.subheader("Ranking de Consumo de Energia")
+
+        # Query para ranking
+        try:
+            query_ranking = f"""
+            SELECT
+                nf3e.num_grupo,
+                nf3e.qt_empresas_consumidoras,
+                nf3e.vl_energia_grupo,
+                nf3e.qt_notas_grupo,
+                nf3e.qt_fornecedores_grupo,
+                nf3e.vl_medio_nota_grupo,
+                p.qntd_cnpj,
+                p.valor_max,
+                p.score_final_ccs
+            FROM gessimples.gei_nf3e_metricas_grupo nf3e
+            JOIN gessimples.gei_percent p ON nf3e.num_grupo = p.num_grupo
+            ORDER BY nf3e.vl_energia_grupo DESC
+            LIMIT 100
+            """
+            df_ranking = pd.read_sql(query_ranking, engine)
+
+            if not df_ranking.empty:
+                df_ranking['vl_energia_fmt'] = df_ranking['vl_energia_grupo'].apply(formatar_moeda)
+                df_ranking['valor_max_fmt'] = df_ranking['valor_max'].apply(formatar_moeda)
+                df_ranking['% Energia/Fat'] = (df_ranking['vl_energia_grupo'] / df_ranking['valor_max'] * 100).round(2)
+
+                st.dataframe(
+                    df_ranking[['num_grupo', 'vl_energia_fmt', 'qt_empresas_consumidoras',
+                               'qt_notas_grupo', 'valor_max_fmt', '% Energia/Fat', 'score_final_ccs']],
+                    column_config={
+                        'num_grupo': 'Grupo',
+                        'vl_energia_fmt': 'Consumo Energia',
+                        'qt_empresas_consumidoras': 'Empresas',
+                        'qt_notas_grupo': 'Notas',
+                        'valor_max_fmt': 'Faturamento',
+                        '% Energia/Fat': '% Energia/Fat',
+                        'score_final_ccs': 'Score'
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                st.info("Nenhum dado de ranking disponível.")
+        except Exception as e:
+            st.error(f"Erro ao carregar ranking: {e}")
+
+    with tab3:
+        st.subheader("Análise Detalhada por Grupo")
+
+        grupos_disponiveis = sorted(df['num_grupo'].unique())
+        grupo_sel = st.selectbox("Selecione um grupo:", ['Selecione...'] + list(grupos_disponiveis), key="energia_grupo")
+
+        if grupo_sel and grupo_sel != 'Selecione...':
+            try:
+                # Carregar dados detalhados
+                query_det = f"""
+                SELECT
+                    cnpj,
+                    jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
+                    jul2024, ago2024, set2024, out2024, nov2024, dez2024,
+                    jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                    jul2025, ago2025, set2025
+                FROM gessimples.gei_nf3e
+                WHERE cnpj IN (
+                    SELECT cnpj FROM gessimples.gei_cnpj WHERE num_grupo = '{grupo_sel}'
+                )
+                """
+                df_det = pd.read_sql(query_det, engine)
+
+                if not df_det.empty:
+                    st.write(f"**Consumo de energia por CNPJ do Grupo {grupo_sel}:**")
+
+                    # Mostrar tabela
+                    meses_cols = [c for c in df_det.columns if c != 'cnpj']
+                    df_show = df_det.copy()
+                    for col in meses_cols:
+                        df_show[col] = df_show[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) and x > 0 else '-')
+
+                    st.dataframe(df_show, hide_index=True, use_container_width=True)
+
+                    # Gráfico de evolução
+                    st.divider()
+                    st.write("**Evolução do Consumo:**")
+
+                    df_melt = df_det.melt(id_vars=['cnpj'], var_name='periodo', value_name='consumo')
+                    df_total = df_melt.groupby('periodo')['consumo'].sum().reset_index()
+
+                    fig = px.line(df_total, x='periodo', y='consumo',
+                                 title=f"Consumo Total de Energia - Grupo {grupo_sel}",
+                                 template=filtros['tema'])
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Nenhum dado de energia encontrado para este grupo.")
+            except Exception as e:
+                st.error(f"Erro ao carregar dados: {e}")
+
+
+# =============================================================================
+# MENU TELECOMUNICAÇÕES (NFCom)
+# =============================================================================
+def menu_telecom(engine, dados, filtros):
+    """Análise de consumo de telecomunicações por grupos econômicos"""
+    st.markdown("<h1 class='main-header'>Telecomunicações (NFCom)</h1>", unsafe_allow_html=True)
+
+    st.info("Análise do consumo de telecomunicações dos grupos econômicos baseada nas Notas Fiscais de Comunicação (NFCom).")
+
+    df = aplicar_filtros(dados['percent'], filtros)
+
+    if df.empty:
+        st.warning("Nenhum dado encontrado.")
+        return
+
+    # Verificar se os campos NFCom existem no percent
+    tem_nfcom = 'nfcom_vl_total' in df.columns
+
+    # Tabs para organizar
+    tab1, tab2, tab3, tab4 = st.tabs(["Panorama Geral", "Ranking", "Por Operadora", "Análise Detalhada"])
+
+    with tab1:
+        st.subheader("Panorama do Consumo de Telecomunicações")
+
+        if tem_nfcom:
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                grupos_com_telecom = len(df[df['nfcom_vl_total'] > 0])
+                st.metric("Grupos com Consumo", f"{grupos_com_telecom:,}")
+
+            with col2:
+                total_telecom = df['nfcom_vl_total'].sum()
+                st.metric("Consumo Total", formatar_moeda(total_telecom))
+
+            with col3:
+                media_telecom = df[df['nfcom_vl_total'] > 0]['nfcom_vl_total'].mean()
+                st.metric("Média por Grupo", formatar_moeda(media_telecom) if pd.notna(media_telecom) else "R$ 0,00")
+
+            with col4:
+                if 'nfcom_perc_telecom_faturamento' in df.columns:
+                    media_perc = df[df['nfcom_perc_telecom_faturamento'] > 0]['nfcom_perc_telecom_faturamento'].mean()
+                    st.metric("% Médio s/ Faturamento", f"{media_perc:.2f}%" if pd.notna(media_perc) else "N/A")
+
+            st.divider()
+
+            # Gráficos
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Distribuição por faixa de consumo
+                df_telecom = df[df['nfcom_vl_total'] > 0].copy()
+                df_telecom['faixa'] = pd.cut(df_telecom['nfcom_vl_total'],
+                                             bins=[0, 5000, 20000, 50000, 100000, float('inf')],
+                                             labels=['0-5k', '5k-20k', '20k-50k', '50k-100k', '>100k'])
+                fig = px.pie(df_telecom['faixa'].value_counts().reset_index(),
+                            values='count', names='faixa',
+                            title="Distribuição por Faixa de Consumo",
+                            template=filtros['tema'])
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                # Relação telecom vs faturamento
+                if 'valor_max' in df.columns:
+                    df_scatter = df[(df['nfcom_vl_total'] > 0) & (df['valor_max'] > 0)].head(500)
+                    fig = px.scatter(df_scatter, x='valor_max', y='nfcom_vl_total',
+                                    title="Telecom vs Faturamento",
+                                    labels={'valor_max': 'Faturamento (R$)', 'nfcom_vl_total': 'Telecom (R$)'},
+                                    template=filtros['tema'],
+                                    hover_data=['num_grupo'])
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            # Carregar diretamente da tabela de métricas
+            if 'nfcom_metricas' in dados and not dados['nfcom_metricas'].empty:
+                df_nfcom = dados['nfcom_metricas']
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Grupos com Consumo", f"{len(df_nfcom):,}")
+                with col2:
+                    st.metric("Consumo Total", formatar_moeda(df_nfcom['vl_telecom_grupo'].sum()))
+                with col3:
+                    st.metric("Média por Grupo", formatar_moeda(df_nfcom['vl_telecom_grupo'].mean()))
+                with col4:
+                    st.metric("Empresas Consumidoras", f"{df_nfcom['qt_empresas_consumidoras'].sum():,}")
+            else:
+                st.warning("Dados de NFCom não disponíveis. Execute as queries de criação das tabelas.")
+
+    with tab2:
+        st.subheader("Ranking de Consumo de Telecomunicações")
+
+        try:
+            query_ranking = f"""
+            SELECT
+                nfcom.num_grupo,
+                nfcom.qt_empresas_consumidoras,
+                nfcom.vl_telecom_grupo,
+                nfcom.qt_notas_grupo,
+                nfcom.qt_operadoras_grupo,
+                nfcom.vl_medio_nota_grupo,
+                p.qntd_cnpj,
+                p.valor_max,
+                p.score_final_ccs
+            FROM gessimples.gei_nfcom_metricas_grupo nfcom
+            JOIN gessimples.gei_percent p ON nfcom.num_grupo = p.num_grupo
+            ORDER BY nfcom.vl_telecom_grupo DESC
+            LIMIT 100
+            """
+            df_ranking = pd.read_sql(query_ranking, engine)
+
+            if not df_ranking.empty:
+                df_ranking['vl_telecom_fmt'] = df_ranking['vl_telecom_grupo'].apply(formatar_moeda)
+                df_ranking['valor_max_fmt'] = df_ranking['valor_max'].apply(formatar_moeda)
+                df_ranking['% Telecom/Fat'] = (df_ranking['vl_telecom_grupo'] / df_ranking['valor_max'] * 100).round(2)
+
+                st.dataframe(
+                    df_ranking[['num_grupo', 'vl_telecom_fmt', 'qt_empresas_consumidoras',
+                               'qt_operadoras_grupo', 'valor_max_fmt', '% Telecom/Fat', 'score_final_ccs']],
+                    column_config={
+                        'num_grupo': 'Grupo',
+                        'vl_telecom_fmt': 'Consumo Telecom',
+                        'qt_empresas_consumidoras': 'Empresas',
+                        'qt_operadoras_grupo': 'Operadoras',
+                        'valor_max_fmt': 'Faturamento',
+                        '% Telecom/Fat': '% Telecom/Fat',
+                        'score_final_ccs': 'Score'
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                st.info("Nenhum dado de ranking disponível.")
+        except Exception as e:
+            st.error(f"Erro ao carregar ranking: {e}")
+
+    with tab3:
+        st.subheader("Análise por Operadora")
+
+        try:
+            query_operadora = """
+            SELECT
+                cnpj_operadora,
+                MAX(nome_operadora) as nome_operadora,
+                COUNT(DISTINCT num_grupo) as qtd_grupos,
+                SUM(qt_empresas_clientes) as total_empresas,
+                SUM(vl_total) as vl_total,
+                SUM(qt_notas) as qt_notas
+            FROM gessimples.gei_nfcom_por_operadora
+            GROUP BY cnpj_operadora
+            ORDER BY vl_total DESC
+            LIMIT 20
+            """
+            df_op = pd.read_sql(query_operadora, engine)
+
+            if not df_op.empty:
+                df_op['vl_total_fmt'] = df_op['vl_total'].apply(formatar_moeda)
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    fig = px.bar(df_op.head(10), x='nome_operadora', y='vl_total',
+                                title="Top 10 Operadoras por Valor",
+                                template=filtros['tema'])
+                    fig.update_xaxes(tickangle=45)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    fig = px.pie(df_op.head(10), values='qtd_grupos', names='nome_operadora',
+                                title="Distribuição de Grupos por Operadora",
+                                template=filtros['tema'])
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.divider()
+                st.dataframe(
+                    df_op[['nome_operadora', 'cnpj_operadora', 'qtd_grupos', 'total_empresas', 'vl_total_fmt', 'qt_notas']],
+                    column_config={
+                        'nome_operadora': 'Operadora',
+                        'cnpj_operadora': 'CNPJ',
+                        'qtd_grupos': 'Grupos',
+                        'total_empresas': 'Empresas',
+                        'vl_total_fmt': 'Valor Total',
+                        'qt_notas': 'Notas'
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+        except Exception as e:
+            st.error(f"Erro ao carregar dados por operadora: {e}")
+
+    with tab4:
+        st.subheader("Análise Detalhada por Grupo")
+
+        grupos_disponiveis = sorted(df['num_grupo'].unique())
+        grupo_sel = st.selectbox("Selecione um grupo:", ['Selecione...'] + list(grupos_disponiveis), key="telecom_grupo")
+
+        if grupo_sel and grupo_sel != 'Selecione...':
+            try:
+                # Carregar dados detalhados
+                query_det = f"""
+                SELECT
+                    cnpj,
+                    jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
+                    jul2024, ago2024, set2024, out2024, nov2024, dez2024,
+                    jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                    jul2025, ago2025, set2025
+                FROM gessimples.gei_nfcom
+                WHERE cnpj IN (
+                    SELECT cnpj FROM gessimples.gei_cnpj WHERE num_grupo = '{grupo_sel}'
+                )
+                """
+                df_det = pd.read_sql(query_det, engine)
+
+                if not df_det.empty:
+                    st.write(f"**Consumo de telecomunicações por CNPJ do Grupo {grupo_sel}:**")
+
+                    # Mostrar tabela
+                    meses_cols = [c for c in df_det.columns if c != 'cnpj']
+                    df_show = df_det.copy()
+                    for col in meses_cols:
+                        df_show[col] = df_show[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) and x > 0 else '-')
+
+                    st.dataframe(df_show, hide_index=True, use_container_width=True)
+
+                    # Gráfico de evolução
+                    st.divider()
+                    st.write("**Evolução do Consumo:**")
+
+                    df_melt = df_det.melt(id_vars=['cnpj'], var_name='periodo', value_name='consumo')
+                    df_total = df_melt.groupby('periodo')['consumo'].sum().reset_index()
+
+                    fig = px.line(df_total, x='periodo', y='consumo',
+                                 title=f"Consumo Total de Telecomunicações - Grupo {grupo_sel}",
+                                 template=filtros['tema'])
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Operadoras do grupo
+                    st.divider()
+                    query_op_grupo = f"""
+                    SELECT nome_operadora, cnpj_operadora, qt_empresas_clientes, vl_total, qt_notas
+                    FROM gessimples.gei_nfcom_por_operadora
+                    WHERE num_grupo = '{grupo_sel}'
+                    ORDER BY vl_total DESC
+                    """
+                    df_op_grupo = pd.read_sql(query_op_grupo, engine)
+
+                    if not df_op_grupo.empty:
+                        st.write("**Operadoras utilizadas pelo grupo:**")
+                        df_op_grupo['vl_total'] = df_op_grupo['vl_total'].apply(formatar_moeda)
+                        st.dataframe(df_op_grupo, hide_index=True)
+                else:
+                    st.info("Nenhum dado de telecomunicações encontrado para este grupo.")
+            except Exception as e:
+                st.error(f"Erro ao carregar dados: {e}")
+
 
 def inconsistencias_nfe(engine, dados, filtros):
     """Análise de inconsistências de NFe"""
@@ -9807,6 +10381,8 @@ def main():
         "Convênio 115",
         "Procuração Bancária (CCS)",
         "Financeiro",
+        "⚡ Energia Elétrica",
+        "📱 Telecomunicações",
         "Inconsistências NFe",
         "Indícios Fiscais",
         "Vínculos Societários",
@@ -9857,6 +10433,10 @@ def main():
         menu_ccs(engine, dados, filtros)
     elif pag == "Financeiro":
         menu_financeiro(engine, dados, filtros)
+    elif pag == "⚡ Energia Elétrica":
+        menu_energia(engine, dados, filtros)
+    elif pag == "📱 Telecomunicações":
+        menu_telecom(engine, dados, filtros)
     elif pag == "Inconsistências NFe":
         inconsistencias_nfe(engine, dados, filtros)
     elif pag == "Indícios Fiscais":
