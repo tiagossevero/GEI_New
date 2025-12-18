@@ -566,6 +566,132 @@ def carregar_dossie_completo(_engine, num_grupo):
         print(f"Erro ao carregar faturamento: {e}")
         dossie['faturamento'] = pd.DataFrame()
 
+    # =========================================================================
+    # 13. ENERGIA ELÉTRICA (NF3e)
+    # =========================================================================
+    try:
+        # Buscar CNPJs do grupo
+        cnpjs_grupo = dossie['cnpjs']['cnpj'].tolist() if not dossie['cnpjs'].empty else []
+
+        if cnpjs_grupo:
+            cnpjs_str = "', '".join([str(c) for c in cnpjs_grupo])
+
+            # Query NF3e - Consumo de energia elétrica
+            query_nf3e = f"""
+            SELECT
+                cnpj,
+                jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
+                jul2024, ago2024, set2024, out2024, nov2024, dez2024,
+                jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                jul2025, ago2025, set2025,
+                vl_icms_12m_total
+            FROM gessimples.gei_nf3e
+            WHERE cnpj IN ('{cnpjs_str}')
+            """
+            dossie['nf3e'] = pd.read_sql(query_nf3e, _engine)
+
+            # Query métricas do grupo
+            query_nf3e_metricas = f"""
+            SELECT *
+            FROM gessimples.gei_nf3e_metricas_grupo
+            WHERE grupo_id = '{num_grupo_str}'
+            """
+            try:
+                dossie['nf3e_metricas'] = pd.read_sql(query_nf3e_metricas, _engine)
+            except:
+                dossie['nf3e_metricas'] = pd.DataFrame()
+
+            # Query detalhado mensal
+            query_nf3e_det = f"""
+            SELECT *
+            FROM gessimples.gei_nf3e_detalhado
+            WHERE grupo_id = '{num_grupo_str}'
+            ORDER BY ano_emissao DESC, mes_emissao DESC
+            """
+            try:
+                dossie['nf3e_detalhado'] = pd.read_sql(query_nf3e_det, _engine)
+            except:
+                dossie['nf3e_detalhado'] = pd.DataFrame()
+        else:
+            dossie['nf3e'] = pd.DataFrame()
+            dossie['nf3e_metricas'] = pd.DataFrame()
+            dossie['nf3e_detalhado'] = pd.DataFrame()
+    except Exception as e:
+        print(f"Erro ao carregar NF3e (energia): {e}")
+        dossie['nf3e'] = pd.DataFrame()
+        dossie['nf3e_metricas'] = pd.DataFrame()
+        dossie['nf3e_detalhado'] = pd.DataFrame()
+
+    # =========================================================================
+    # 14. TELECOMUNICAÇÕES (NFCom)
+    # =========================================================================
+    try:
+        # Buscar CNPJs do grupo
+        cnpjs_grupo = dossie['cnpjs']['cnpj'].tolist() if not dossie['cnpjs'].empty else []
+
+        if cnpjs_grupo:
+            cnpjs_str = "', '".join([str(c) for c in cnpjs_grupo])
+
+            # Query NFCom - Consumo de telecomunicações
+            query_nfcom = f"""
+            SELECT
+                cnpj,
+                jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
+                jul2024, ago2024, set2024, out2024, nov2024, dez2024,
+                jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
+                jul2025, ago2025, set2025,
+                vl_icms_12m_total
+            FROM gessimples.gei_nfcom
+            WHERE cnpj IN ('{cnpjs_str}')
+            """
+            dossie['nfcom'] = pd.read_sql(query_nfcom, _engine)
+
+            # Query métricas do grupo
+            query_nfcom_metricas = f"""
+            SELECT *
+            FROM gessimples.gei_nfcom_metricas_grupo
+            WHERE grupo_id = '{num_grupo_str}'
+            """
+            try:
+                dossie['nfcom_metricas'] = pd.read_sql(query_nfcom_metricas, _engine)
+            except:
+                dossie['nfcom_metricas'] = pd.DataFrame()
+
+            # Query detalhado mensal
+            query_nfcom_det = f"""
+            SELECT *
+            FROM gessimples.gei_nfcom_detalhado
+            WHERE grupo_id = '{num_grupo_str}'
+            ORDER BY ano_emissao DESC, mes_emissao DESC
+            """
+            try:
+                dossie['nfcom_detalhado'] = pd.read_sql(query_nfcom_det, _engine)
+            except:
+                dossie['nfcom_detalhado'] = pd.DataFrame()
+
+            # Query por operadora
+            query_nfcom_op = f"""
+            SELECT *
+            FROM gessimples.gei_nfcom_por_operadora
+            WHERE grupo_id = '{num_grupo_str}'
+            ORDER BY vl_total DESC
+            """
+            try:
+                dossie['nfcom_operadoras'] = pd.read_sql(query_nfcom_op, _engine)
+            except:
+                dossie['nfcom_operadoras'] = pd.DataFrame()
+        else:
+            dossie['nfcom'] = pd.DataFrame()
+            dossie['nfcom_metricas'] = pd.DataFrame()
+            dossie['nfcom_detalhado'] = pd.DataFrame()
+            dossie['nfcom_operadoras'] = pd.DataFrame()
+    except Exception as e:
+        print(f"Erro ao carregar NFCom (telecom): {e}")
+        dossie['nfcom'] = pd.DataFrame()
+        dossie['nfcom_metricas'] = pd.DataFrame()
+        dossie['nfcom_detalhado'] = pd.DataFrame()
+        dossie['nfcom_operadoras'] = pd.DataFrame()
+
     return dossie
 
 # =============================================================================
@@ -6992,7 +7118,7 @@ def dossie_grupo(engine, dados, filtros):
             st.metric("Sócios Compartilhados", int(socios_val) if pd.notna(socios_val) else 0)
     
     # Tabs para organizar informações
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14 = st.tabs([
         "CNPJs e Cadastro",
         "Receita/Faturamento",
         "Sócios",
@@ -7003,6 +7129,8 @@ def dossie_grupo(engine, dados, filtros):
         "Funcionários",
         "Pagamentos",
         "Métricas Detalhadas",
+        "Energia Elétrica",
+        "Telecomunicações",
         "Análise de Similaridade",
         "Exportação"
     ])
@@ -7686,9 +7814,291 @@ def dossie_grupo(engine, dados, filtros):
             st.dataframe(df_metricas, width='stretch', hide_index=True)
 
     # =========================================================================
-    # TAB 11: ANÁLISE DE SIMILARIDADE - EVIDÊNCIAS DE GRUPO ECONÔMICO
+    # TAB 11: ENERGIA ELÉTRICA (NF3e)
     # =========================================================================
     with tab11:
+        st.subheader("⚡ Consumo de Energia Elétrica")
+
+        # Verificar se há dados de NF3e
+        if 'nf3e' in dossie and not dossie['nf3e'].empty:
+            df_nf3e = dossie['nf3e'].copy()
+
+            # Métricas do grupo
+            if 'nf3e_metricas' in dossie and not dossie['nf3e_metricas'].empty:
+                metricas = dossie['nf3e_metricas'].iloc[0]
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Empresas Consumidoras", int(metricas.get('qt_empresas_consumidoras', 0)))
+                with col2:
+                    st.metric("Valor Total Energia", formatar_moeda(metricas.get('vl_energia_grupo', 0)))
+                with col3:
+                    st.metric("ICMS Total", formatar_moeda(metricas.get('vl_icms_grupo', 0)))
+                with col4:
+                    st.metric("Qtd. Notas", int(metricas.get('qt_notas_grupo', 0)))
+
+                st.divider()
+
+            # Resumo por CNPJ
+            st.write("**Consumo de Energia por CNPJ (acumulado 12 meses):**")
+
+            # Pegar o último valor disponível
+            meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025',
+                         'mar2025', 'fev2025', 'jan2025', 'dez2024', 'nov2024', 'out2024']
+
+            def get_ultimo_valor_energia(row):
+                for mes in meses_cols:
+                    if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                        return row[mes]
+                return 0
+
+            df_nf3e['ultimo_valor_12m'] = df_nf3e.apply(get_ultimo_valor_energia, axis=1)
+
+            # Resumo
+            df_resumo_energia = df_nf3e[['cnpj', 'ultimo_valor_12m', 'vl_icms_12m_total']].copy()
+            df_resumo_energia.columns = ['CNPJ', 'Energia 12m (R$)', 'ICMS 12m (R$)']
+            df_resumo_energia['Energia Formatada'] = df_resumo_energia['Energia 12m (R$)'].apply(formatar_moeda)
+            df_resumo_energia['ICMS Formatado'] = df_resumo_energia['ICMS 12m (R$)'].apply(formatar_moeda)
+
+            total_energia = df_resumo_energia['Energia 12m (R$)'].sum()
+            total_icms = df_resumo_energia['ICMS 12m (R$)'].sum()
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total CNPJs com Energia", len(df_resumo_energia))
+            with col2:
+                st.metric("Consumo Total (soma)", formatar_moeda(total_energia))
+            with col3:
+                st.metric("ICMS Total", formatar_moeda(total_icms))
+
+            st.dataframe(
+                df_resumo_energia.sort_values('Energia 12m (R$)', ascending=False)[['CNPJ', 'Energia Formatada', 'ICMS Formatado']],
+                hide_index=True,
+                use_container_width=True
+            )
+
+            # Gráfico de evolução
+            st.divider()
+            st.write("**Evolução do Consumo de Energia:**")
+            try:
+                meses_disponiveis = [m for m in meses_cols if m in df_nf3e.columns]
+                df_chart = df_nf3e.melt(
+                    id_vars=['cnpj'],
+                    value_vars=meses_disponiveis,
+                    var_name='periodo',
+                    value_name='consumo'
+                )
+                df_chart = df_chart[df_chart['consumo'].notna() & (df_chart['consumo'] > 0)]
+
+                if not df_chart.empty:
+                    ordem_meses = {'jan2024': 1, 'fev2024': 2, 'mar2024': 3, 'abr2024': 4, 'mai2024': 5, 'jun2024': 6,
+                                  'jul2024': 7, 'ago2024': 8, 'set2024': 9, 'out2024': 10, 'nov2024': 11, 'dez2024': 12,
+                                  'jan2025': 13, 'fev2025': 14, 'mar2025': 15, 'abr2025': 16, 'mai2025': 17, 'jun2025': 18,
+                                  'jul2025': 19, 'ago2025': 20, 'set2025': 21}
+                    df_chart['ordem'] = df_chart['periodo'].map(ordem_meses)
+                    df_chart = df_chart.sort_values('ordem')
+
+                    # Gráfico de total do grupo
+                    df_total = df_chart.groupby('periodo').agg({
+                        'consumo': 'sum',
+                        'ordem': 'first'
+                    }).reset_index().sort_values('ordem')
+
+                    fig = px.line(
+                        df_total,
+                        x='periodo',
+                        y='consumo',
+                        title="Consumo Total de Energia do Grupo (acumulado 12 meses)",
+                        labels={'consumo': 'Valor (R$)', 'periodo': 'Período'},
+                        markers=True
+                    )
+                    fig.update_traces(line=dict(width=3, color='#f9a825'), marker=dict(size=10))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Sem dados suficientes para gerar o gráfico.")
+            except Exception as e:
+                st.warning(f"Não foi possível gerar o gráfico: {e}")
+
+            # Detalhamento mensal
+            if 'nf3e_detalhado' in dossie and not dossie['nf3e_detalhado'].empty:
+                st.divider()
+                st.write("**Detalhamento Mensal:**")
+                df_det = dossie['nf3e_detalhado'].copy()
+                df_det['Energia Mensal'] = df_det['vl_energia_mensal'].apply(formatar_moeda)
+                df_det['ICMS Mensal'] = df_det['vl_icms_mensal'].apply(formatar_moeda)
+                st.dataframe(
+                    df_det[['cnpj', 'ano_emissao', 'mes_emissao', 'Energia Mensal', 'ICMS Mensal', 'qt_notas', 'qt_fornecedores']].rename(
+                        columns={'cnpj': 'CNPJ', 'ano_emissao': 'Ano', 'mes_emissao': 'Mês', 'qt_notas': 'Qtd. Notas', 'qt_fornecedores': 'Fornecedores'}
+                    ),
+                    hide_index=True,
+                    use_container_width=True
+                )
+        else:
+            st.info("Nenhum dado de consumo de energia elétrica (NF3e) disponível para este grupo.")
+
+    # =========================================================================
+    # TAB 12: TELECOMUNICAÇÕES (NFCom)
+    # =========================================================================
+    with tab12:
+        st.subheader("📱 Consumo de Telecomunicações")
+
+        # Verificar se há dados de NFCom
+        if 'nfcom' in dossie and not dossie['nfcom'].empty:
+            df_nfcom = dossie['nfcom'].copy()
+
+            # Métricas do grupo
+            if 'nfcom_metricas' in dossie and not dossie['nfcom_metricas'].empty:
+                metricas = dossie['nfcom_metricas'].iloc[0]
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Empresas Consumidoras", int(metricas.get('qt_empresas_consumidoras', 0)))
+                with col2:
+                    st.metric("Valor Total Telecom", formatar_moeda(metricas.get('vl_telecom_grupo', 0)))
+                with col3:
+                    st.metric("ICMS Total", formatar_moeda(metricas.get('vl_icms_grupo', 0)))
+                with col4:
+                    st.metric("Qtd. Notas", int(metricas.get('qt_notas_grupo', 0)))
+
+                st.divider()
+
+            # Sub-tabs
+            sub_tab1, sub_tab2, sub_tab3 = st.tabs(["Por CNPJ", "Por Operadora", "Detalhamento"])
+
+            with sub_tab1:
+                st.write("**Consumo de Telecomunicações por CNPJ (acumulado 12 meses):**")
+
+                # Pegar o último valor disponível
+                meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025',
+                             'mar2025', 'fev2025', 'jan2025', 'dez2024', 'nov2024', 'out2024']
+
+                def get_ultimo_valor_telecom(row):
+                    for mes in meses_cols:
+                        if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                            return row[mes]
+                    return 0
+
+                df_nfcom['ultimo_valor_12m'] = df_nfcom.apply(get_ultimo_valor_telecom, axis=1)
+
+                # Resumo
+                df_resumo_telecom = df_nfcom[['cnpj', 'ultimo_valor_12m', 'vl_icms_12m_total']].copy()
+                df_resumo_telecom.columns = ['CNPJ', 'Telecom 12m (R$)', 'ICMS 12m (R$)']
+                df_resumo_telecom['Telecom Formatada'] = df_resumo_telecom['Telecom 12m (R$)'].apply(formatar_moeda)
+                df_resumo_telecom['ICMS Formatado'] = df_resumo_telecom['ICMS 12m (R$)'].apply(formatar_moeda)
+
+                total_telecom = df_resumo_telecom['Telecom 12m (R$)'].sum()
+                total_icms_telecom = df_resumo_telecom['ICMS 12m (R$)'].sum()
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total CNPJs com Telecom", len(df_resumo_telecom))
+                with col2:
+                    st.metric("Consumo Total (soma)", formatar_moeda(total_telecom))
+                with col3:
+                    st.metric("ICMS Total", formatar_moeda(total_icms_telecom))
+
+                st.dataframe(
+                    df_resumo_telecom.sort_values('Telecom 12m (R$)', ascending=False)[['CNPJ', 'Telecom Formatada', 'ICMS Formatado']],
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+                # Gráfico de evolução
+                st.divider()
+                st.write("**Evolução do Consumo de Telecomunicações:**")
+                try:
+                    meses_disponiveis = [m for m in meses_cols if m in df_nfcom.columns]
+                    df_chart = df_nfcom.melt(
+                        id_vars=['cnpj'],
+                        value_vars=meses_disponiveis,
+                        var_name='periodo',
+                        value_name='consumo'
+                    )
+                    df_chart = df_chart[df_chart['consumo'].notna() & (df_chart['consumo'] > 0)]
+
+                    if not df_chart.empty:
+                        ordem_meses = {'jan2024': 1, 'fev2024': 2, 'mar2024': 3, 'abr2024': 4, 'mai2024': 5, 'jun2024': 6,
+                                      'jul2024': 7, 'ago2024': 8, 'set2024': 9, 'out2024': 10, 'nov2024': 11, 'dez2024': 12,
+                                      'jan2025': 13, 'fev2025': 14, 'mar2025': 15, 'abr2025': 16, 'mai2025': 17, 'jun2025': 18,
+                                      'jul2025': 19, 'ago2025': 20, 'set2025': 21}
+                        df_chart['ordem'] = df_chart['periodo'].map(ordem_meses)
+                        df_chart = df_chart.sort_values('ordem')
+
+                        # Gráfico de total do grupo
+                        df_total = df_chart.groupby('periodo').agg({
+                            'consumo': 'sum',
+                            'ordem': 'first'
+                        }).reset_index().sort_values('ordem')
+
+                        fig = px.line(
+                            df_total,
+                            x='periodo',
+                            y='consumo',
+                            title="Consumo Total de Telecomunicações do Grupo (acumulado 12 meses)",
+                            labels={'consumo': 'Valor (R$)', 'periodo': 'Período'},
+                            markers=True
+                        )
+                        fig.update_traces(line=dict(width=3, color='#2196f3'), marker=dict(size=10))
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Sem dados suficientes para gerar o gráfico.")
+                except Exception as e:
+                    st.warning(f"Não foi possível gerar o gráfico: {e}")
+
+            with sub_tab2:
+                # Análise por operadora
+                if 'nfcom_operadoras' in dossie and not dossie['nfcom_operadoras'].empty:
+                    st.write("**Consumo por Operadora de Telecomunicações:**")
+                    df_op = dossie['nfcom_operadoras'].copy()
+                    df_op['Valor Total'] = df_op['vl_total'].apply(formatar_moeda)
+                    st.dataframe(
+                        df_op[['cnpj_operadora', 'nome_operadora', 'qt_empresas_clientes', 'Valor Total', 'qt_notas']].rename(
+                            columns={
+                                'cnpj_operadora': 'CNPJ Operadora',
+                                'nome_operadora': 'Nome Operadora',
+                                'qt_empresas_clientes': 'Empresas Clientes',
+                                'qt_notas': 'Qtd. Notas'
+                            }
+                        ),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                    # Gráfico de pizza por operadora
+                    try:
+                        fig_pie = px.pie(
+                            df_op,
+                            values='vl_total',
+                            names='nome_operadora',
+                            title="Distribuição do Consumo por Operadora"
+                        )
+                        st.plotly_chart(fig_pie, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Não foi possível gerar o gráfico: {e}")
+                else:
+                    st.info("Nenhum dado de operadoras disponível.")
+
+            with sub_tab3:
+                # Detalhamento mensal
+                if 'nfcom_detalhado' in dossie and not dossie['nfcom_detalhado'].empty:
+                    st.write("**Detalhamento Mensal:**")
+                    df_det = dossie['nfcom_detalhado'].copy()
+                    df_det['Telecom Mensal'] = df_det['vl_telecom_mensal'].apply(formatar_moeda)
+                    df_det['ICMS Mensal'] = df_det['vl_icms_mensal'].apply(formatar_moeda)
+                    st.dataframe(
+                        df_det[['cnpj', 'ano_emissao', 'mes_emissao', 'Telecom Mensal', 'ICMS Mensal', 'qt_notas', 'qt_operadoras']].rename(
+                            columns={'cnpj': 'CNPJ', 'ano_emissao': 'Ano', 'mes_emissao': 'Mês', 'qt_notas': 'Qtd. Notas', 'qt_operadoras': 'Operadoras'}
+                        ),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                else:
+                    st.info("Nenhum detalhamento mensal disponível.")
+        else:
+            st.info("Nenhum dado de consumo de telecomunicações (NFCom) disponível para este grupo.")
+
+    # =========================================================================
+    # TAB 13: ANÁLISE DE SIMILARIDADE - EVIDÊNCIAS DE GRUPO ECONÔMICO
+    # =========================================================================
+    with tab13:
         st.subheader("🔍 Análise de Similaridade - Evidências de Grupo Econômico")
 
         st.info("""
@@ -8524,9 +8934,9 @@ def dossie_grupo(engine, dados, filtros):
                     st.plotly_chart(fig, use_container_width=True)
 
     # =========================================================================
-    # TAB 12: EXPORTAÇÃO
+    # TAB 14: EXPORTAÇÃO
     # =========================================================================
-    with tab12:
+    with tab14:
         st.subheader("Exportação de Relatório")
         
         st.write("""
