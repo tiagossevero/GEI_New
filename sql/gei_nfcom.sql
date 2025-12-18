@@ -153,7 +153,7 @@ WITH base AS (
 por_cnpj AS (
   SELECT
     b.cnpj_dest,
-    gc.grupo_id,
+    gc.num_grupo,
     SUM(b.vl_nota) AS vl_total_telecom,
     COUNT(*) AS qt_notas,
     COUNT(DISTINCT b.cnpj_emit) AS qt_operadoras,
@@ -164,10 +164,10 @@ por_cnpj AS (
   FROM base b
   JOIN gessimples.gei_cnpj gc ON b.cnpj_dest = gc.cnpj
   WHERE LENGTH(b.cnpj_dest) >= 11
-  GROUP BY b.cnpj_dest, gc.grupo_id
+  GROUP BY b.cnpj_dest, gc.num_grupo
 )
 SELECT
-  grupo_id,
+  num_grupo,
   COUNT(DISTINCT cnpj_dest) AS qt_empresas_consumidoras,
   SUM(vl_total_telecom) AS vl_telecom_grupo,
   SUM(qt_notas) AS qt_notas_grupo,
@@ -176,7 +176,7 @@ SELECT
   MAX(vl_max_nota) AS vl_max_nota_grupo,
   AVG(qt_meses_consumo) AS media_meses_consumo
 FROM por_cnpj
-GROUP BY grupo_id;
+GROUP BY num_grupo;
 
 COMPUTE STATS gessimples.gei_nfcom_metricas_grupo;
 
@@ -204,7 +204,7 @@ WITH base AS (
 )
 SELECT
   b.cnpj_dest AS cnpj,
-  gc.grupo_id,
+  gc.num_grupo,
   b.ano_emissao,
   b.mes_emissao,
   SUM(b.vl_nota) AS vl_telecom_mensal,
@@ -213,7 +213,7 @@ SELECT
 FROM base b
 JOIN gessimples.gei_cnpj gc ON b.cnpj_dest = gc.cnpj
 WHERE LENGTH(b.cnpj_dest) >= 11
-GROUP BY b.cnpj_dest, gc.grupo_id, b.ano_emissao, b.mes_emissao;
+GROUP BY b.cnpj_dest, gc.num_grupo, b.ano_emissao, b.mes_emissao;
 
 COMPUTE STATS gessimples.gei_nfcom_detalhado;
 
@@ -240,7 +240,7 @@ WITH base AS (
          OR procnfcom.nfcom.infnfcom.dest.cpf IS NOT NULL)
 )
 SELECT
-  gc.grupo_id,
+  gc.num_grupo,
   b.cnpj_operadora,
   MAX(b.nome_operadora) AS nome_operadora,
   COUNT(DISTINCT b.cnpj_dest) AS qt_empresas_clientes,
@@ -250,6 +250,6 @@ FROM base b
 JOIN gessimples.gei_cnpj gc ON b.cnpj_dest = gc.cnpj
 WHERE LENGTH(b.cnpj_dest) >= 11
   AND LENGTH(b.cnpj_operadora) >= 11
-GROUP BY gc.grupo_id, b.cnpj_operadora;
+GROUP BY gc.num_grupo, b.cnpj_operadora;
 
 COMPUTE STATS gessimples.gei_nfcom_por_operadora;

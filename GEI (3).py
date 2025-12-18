@@ -593,7 +593,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nf3e_metricas = f"""
             SELECT *
             FROM gessimples.gei_nf3e_metricas_grupo
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             """
             try:
                 dossie['nf3e_metricas'] = pd.read_sql(query_nf3e_metricas, _engine)
@@ -604,7 +604,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nf3e_det = f"""
             SELECT *
             FROM gessimples.gei_nf3e_detalhado
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             ORDER BY ano_emissao DESC, mes_emissao DESC
             """
             try:
@@ -648,7 +648,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nfcom_metricas = f"""
             SELECT *
             FROM gessimples.gei_nfcom_metricas_grupo
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             """
             try:
                 dossie['nfcom_metricas'] = pd.read_sql(query_nfcom_metricas, _engine)
@@ -659,7 +659,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nfcom_det = f"""
             SELECT *
             FROM gessimples.gei_nfcom_detalhado
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             ORDER BY ano_emissao DESC, mes_emissao DESC
             """
             try:
@@ -671,7 +671,7 @@ def carregar_dossie_completo(_engine, num_grupo):
             query_nfcom_op = f"""
             SELECT *
             FROM gessimples.gei_nfcom_por_operadora
-            WHERE grupo_id = '{num_grupo_str}'
+            WHERE num_grupo = '{num_grupo_str}'
             ORDER BY vl_total DESC
             """
             try:
