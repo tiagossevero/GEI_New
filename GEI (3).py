@@ -614,6 +614,98 @@ def formatar_moeda(valor):
     else:
         return f"R$ {valor:.2f}"
 
+def gerar_column_config(colunas_df):
+    """
+    Gera configuração de colunas com ProgressColumn para scores e índices.
+
+    Args:
+        colunas_df: Lista de colunas presentes no DataFrame
+
+    Returns:
+        dict: Configuração de colunas para st.dataframe
+    """
+    config = {}
+
+    # Mapeamento de colunas para ProgressColumn
+    # Formato: nome_coluna: (label, min_value, max_value, format)
+    progress_columns = {
+        # Scores (0-100%)
+        'score_ml_percentual': ('Score ML %', 0, 100, '%.1f%%'),
+        'score_final_ccs': ('Score GEI', 0, 50, '%.1f'),
+        'score_final_avancado': ('Score Avançado', 0, 50, '%.1f'),
+        'score_inconsistencias_nfe': ('Score NFe', 0, 10, '%.1f'),
+
+        # Índices de Risco (0-1 normalizados)
+        'indice_risco_grupo_economico': ('Índice Risco C115', 0.0, 1.0, '%.3f'),
+        'indice_risco_ccs': ('Índice Risco CCS', 0.0, 1.0, '%.4f'),
+        'indice_risco_indicios': ('Índice Risco Indícios', 0.0, 1.0, '%.3f'),
+        'indice_risco_pagamentos': ('Índice Risco Pag.', 0.0, 1.0, '%.4f'),
+        'indice_risco_fat_func': ('Índice Risco Fat/Func', 0.0, 1.0, '%.4f'),
+        'indice_interconexao': ('Índice Interconexão', 0.0, 1.0, '%.3f'),
+
+        # Percentuais (0-100%)
+        'perc_cnpjs_com_socios': ('% CNPJs c/ Sócios', 0, 100, '%.1f%%'),
+        'perc_cnpjs_relacionados': ('% CNPJs Relac.', 0, 100, '%.1f%%'),
+        'perc_cnpjs_relacionados_c115': ('% CNPJs C115', 0, 100, '%.1f%%'),
+        'perc_cnpjs_com_indicios': ('% CNPJs c/ Indícios', 0, 100, '%.1f%%'),
+        'perc_contas_compartilhadas': ('% Contas Compart.', 0, 100, '%.1f%%'),
+
+        # Percentuais NFe
+        'perc_cliente_incons': ('% Cliente Incons.', 0, 100, '%.1f%%'),
+        'perc_email_incons': ('% Email Incons.', 0, 100, '%.1f%%'),
+        'perc_tel_dest_incons': ('% Tel Dest. Incons.', 0, 100, '%.1f%%'),
+        'perc_tel_emit_incons': ('% Tel Emit. Incons.', 0, 100, '%.1f%%'),
+        'perc_ip_transmissao_incons': ('% IP Trans. Incons.', 0, 100, '%.1f%%'),
+    }
+
+    for coluna in colunas_df:
+        if coluna in progress_columns:
+            label, min_val, max_val, fmt = progress_columns[coluna]
+            config[coluna] = st.column_config.ProgressColumn(
+                label,
+                help=f"Valor entre {min_val} e {max_val}",
+                min_value=min_val,
+                max_value=max_val,
+                format=fmt
+            )
+
+    return config
+
+def calcular_impacto_financeiro_grupo(df_grupo, diferenca_aliquota=0.07):
+    """
+    Calcula o impacto financeiro estimado para um DataFrame de grupos.
+
+    Args:
+        df_grupo: DataFrame com os grupos
+        diferenca_aliquota: Diferença de alíquota (padrão 7%)
+
+    Returns:
+        tuple: (impacto_total, faturamento_simples, qtd_grupos, qtd_cnpjs_simples)
+    """
+    if df_grupo.empty:
+        return 0, 0, 0, 0
+
+    df = df_grupo.copy()
+
+    # Calcular faturamento do Simples Nacional
+    if 'qntd_sn' in df.columns and 'qntd_normal' in df.columns:
+        total_cnpjs = df['qntd_sn'].fillna(0) + df['qntd_normal'].fillna(0)
+        df['prop_simples'] = df['qntd_sn'].fillna(0) / total_cnpjs.replace(0, 1)
+        df['faturamento_simples'] = df['valor_max'].fillna(0) * df['prop_simples']
+        faturamento_simples = df['faturamento_simples'].sum()
+        qtd_cnpjs_simples = int(df['qntd_sn'].fillna(0).sum())
+    elif 'receita_maxima' in df.columns:
+        faturamento_simples = df['receita_maxima'].fillna(0).sum()
+        qtd_cnpjs_simples = int(df['qtd_cnpjs'].sum()) if 'qtd_cnpjs' in df.columns else len(df)
+    else:
+        faturamento_simples = df['valor_max'].fillna(0).sum() if 'valor_max' in df.columns else 0
+        qtd_cnpjs_simples = int(df['qntd_cnpj'].sum()) if 'qntd_cnpj' in df.columns else len(df)
+
+    impacto_total = faturamento_simples * diferenca_aliquota
+    qtd_grupos = len(df)
+
+    return impacto_total, faturamento_simples, qtd_grupos, qtd_cnpjs_simples
+
 def analise_machine_learning(engine, dados, filtros):
     """Análise de Machine Learning para identificação de grupos econômicos"""
     
@@ -1284,13 +1376,30 @@ def analise_machine_learning(engine, dados, filtros):
                     acima_limite = (grupos_3votos['acima_limite_sn'] == 1).sum()
                     st.metric("Acima Limite SN", f"{acima_limite} ({acima_limite/len(grupos_3votos)*100:.1f}%)")
                 
+                # Impacto Financeiro - Consenso Forte (3/3)
+                st.divider()
+                st.write("**💰 Impacto Financeiro Estimado - Consenso Forte (3/3):**")
+                impacto_3v, fat_simples_3v, qtd_grupos_3v, qtd_cnpjs_3v = calcular_impacto_financeiro_grupo(grupos_3votos)
+
+                col_imp1, col_imp2, col_imp3, col_imp4 = st.columns(4)
+                with col_imp1:
+                    st.metric("Grupos", f"{qtd_grupos_3v:,}")
+                with col_imp2:
+                    st.metric("CNPJs Estimados", f"{qtd_cnpjs_3v:,}")
+                with col_imp3:
+                    st.metric("Faturamento", formatar_moeda(fat_simples_3v))
+                with col_imp4:
+                    st.metric("Impacto Fiscal (7%)", formatar_moeda(impacto_3v), delta="potencial não arrecadado")
+
+                st.divider()
+
                 # Tabela top 50
                 colunas_exibir = [
                     'num_grupo', 'score_ml_percentual', 'score_final_ccs', 'qtd_cnpjs',
                     'socios_compartilhados', 'receita_maxima', 'total_indicios',
                     'contas_compartilhadas', 'kmeans_eh_grupo', 'dbscan_eh_grupo', 'iforest_eh_grupo'
                 ]
-                
+
                 df_display = grupos_3votos[colunas_exibir].copy()
                 df_display['receita_maxima'] = df_display['receita_maxima'].apply(formatar_moeda)
                 df_display = df_display.rename(columns={
@@ -1298,9 +1407,11 @@ def analise_machine_learning(engine, dados, filtros):
                     'dbscan_eh_grupo': 'DBSCAN',
                     'iforest_eh_grupo': 'I.Forest'
                 })
-                
-                st.dataframe(df_display.head(50), width='stretch', hide_index=True)
-                
+
+                # Configurar ProgressColumn para scores
+                column_config = gerar_column_config(df_display.columns.tolist())
+                st.dataframe(df_display.head(50), column_config=column_config, use_container_width=True, hide_index=True)
+
                 # Seletor de grupo
                 grupo_sel = st.selectbox(
                     "Selecione um grupo para análise detalhada:",
@@ -1349,21 +1460,40 @@ def analise_machine_learning(engine, dados, filtros):
                     st.metric("K-Means + I.Forest", comb_km_if)
                 with col3:
                     st.metric("DBSCAN + I.Forest", comb_db_if)
-                
+
+                # Impacto Financeiro - Consenso Moderado (2/3)
+                st.divider()
+                st.write("**💰 Impacto Financeiro Estimado - Consenso Moderado (2/3):**")
+                impacto_2v, fat_simples_2v, qtd_grupos_2v, qtd_cnpjs_2v = calcular_impacto_financeiro_grupo(grupos_2votos)
+
+                col_imp1, col_imp2, col_imp3, col_imp4 = st.columns(4)
+                with col_imp1:
+                    st.metric("Grupos", f"{qtd_grupos_2v:,}")
+                with col_imp2:
+                    st.metric("CNPJs Estimados", f"{qtd_cnpjs_2v:,}")
+                with col_imp3:
+                    st.metric("Faturamento", formatar_moeda(fat_simples_2v))
+                with col_imp4:
+                    st.metric("Impacto Fiscal (7%)", formatar_moeda(impacto_2v), delta="potencial não arrecadado")
+
+                st.divider()
+
                 # Tabela
                 colunas_exibir = [
                     'num_grupo', 'score_ml_percentual', 'score_final_ccs', 'qtd_cnpjs',
                     'kmeans_eh_grupo', 'dbscan_eh_grupo', 'iforest_eh_grupo'
                 ]
-                
+
                 df_display = grupos_2votos[colunas_exibir].copy()
                 df_display = df_display.rename(columns={
                     'kmeans_eh_grupo': 'K-Means',
                     'dbscan_eh_grupo': 'DBSCAN',
                     'iforest_eh_grupo': 'I.Forest'
                 })
-                
-                st.dataframe(df_display.head(50), width='stretch', hide_index=True)
+
+                # Configurar ProgressColumn para scores
+                column_config = gerar_column_config(df_display.columns.tolist())
+                st.dataframe(df_display.head(50), column_config=column_config, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum grupo com consenso moderado (2/3).")
         
@@ -1401,21 +1531,23 @@ def analise_machine_learning(engine, dados, filtros):
                     st.metric("Apenas DBSCAN", apenas_db)
                 with col3:
                     st.metric("Apenas I.Forest", apenas_if)
-                
+
                 # Tabela resumida
                 colunas_exibir = [
                     'num_grupo', 'score_ml_percentual', 'qtd_cnpjs',
                     'kmeans_eh_grupo', 'dbscan_eh_grupo', 'iforest_eh_grupo'
                 ]
-                
+
                 df_display = grupos_1voto[colunas_exibir].copy()
                 df_display = df_display.rename(columns={
                     'kmeans_eh_grupo': 'K-Means',
                     'dbscan_eh_grupo': 'DBSCAN',
                     'iforest_eh_grupo': 'I.Forest'
                 })
-                
-                st.dataframe(df_display.head(50), width='stretch', hide_index=True)
+
+                # Configurar ProgressColumn para scores
+                column_config = gerar_column_config(df_display.columns.tolist())
+                st.dataframe(df_display.head(50), column_config=column_config, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum grupo com consenso fraco (1/3).")
         
@@ -1431,13 +1563,75 @@ def analise_machine_learning(engine, dados, filtros):
                     st.metric("Score ML Médio", f"{grupos_0votos['score_ml_percentual'].mean():.1f}%")
                 with col2:
                     st.metric("Score GEI Médio", f"{grupos_0votos['score_final_ccs'].mean():.1f}")
-                
+
                 # Tabela resumida
                 colunas_exibir = ['num_grupo', 'score_ml_percentual', 'score_final_ccs', 'qtd_cnpjs']
-                st.dataframe(grupos_0votos[colunas_exibir].head(50), width='stretch', hide_index=True)
+                df_display_0v = grupos_0votos[colunas_exibir].copy()
+
+                # Configurar ProgressColumn para scores
+                column_config = gerar_column_config(df_display_0v.columns.tolist())
+                st.dataframe(df_display_0v.head(50), column_config=column_config, use_container_width=True, hide_index=True)
             else:
                 st.info("Todos os grupos foram identificados como Grupo Econômico por pelo menos 1 algoritmo.")
-        
+
+        # ================================================================
+        # SEÇÃO 5.5: RESUMO DO IMPACTO FINANCEIRO POR CONSENSO
+        # ================================================================
+        st.header("5.5 Resumo do Impacto Financeiro por Nível de Consenso")
+
+        st.info("""
+        **Metodologia de Cálculo:**
+        - Diferença de alíquota: **7%** (Regime Normal 17% - Simples Nacional ~10%)
+        - Impacto = Faturamento estimado × 7%
+        - Quanto maior o consenso entre os modelos ML, maior a confiança na identificação do grupo.
+        """)
+
+        # Calcular impactos para cada nível de consenso
+        impacto_3v, fat_3v, qtd_grupos_3v, qtd_cnpjs_3v = calcular_impacto_financeiro_grupo(grupos_3votos)
+        impacto_2v, fat_2v, qtd_grupos_2v, qtd_cnpjs_2v = calcular_impacto_financeiro_grupo(grupos_2votos)
+
+        # Impacto combinado (2/3 + 3/3)
+        impacto_combinado = impacto_3v + impacto_2v
+        fat_combinado = fat_3v + fat_2v
+        qtd_grupos_combinado = qtd_grupos_3v + qtd_grupos_2v
+        qtd_cnpjs_combinado = qtd_cnpjs_3v + qtd_cnpjs_2v
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("### 🔴 Consenso Forte (3/3)")
+            st.metric("Grupos", f"{qtd_grupos_3v:,}")
+            st.metric("Faturamento", formatar_moeda(fat_3v))
+            st.metric("Impacto Fiscal", formatar_moeda(impacto_3v))
+
+        with col2:
+            st.markdown("### 🟠 Consenso Moderado (2/3)")
+            st.metric("Grupos", f"{qtd_grupos_2v:,}")
+            st.metric("Faturamento", formatar_moeda(fat_2v))
+            st.metric("Impacto Fiscal", formatar_moeda(impacto_2v))
+
+        with col3:
+            st.markdown("### 🟢 Total Combinado (2/3 + 3/3)")
+            st.metric("Grupos", f"{qtd_grupos_combinado:,}")
+            st.metric("Faturamento", formatar_moeda(fat_combinado))
+            st.metric("Impacto Fiscal Total", formatar_moeda(impacto_combinado), delta="potencial não arrecadado")
+
+        st.divider()
+
+        # Gráfico comparativo
+        import plotly.graph_objects as go
+        fig = go.Figure(data=[
+            go.Bar(name='Consenso Forte (3/3)', x=['Grupos', 'Impacto (R$ Mi)'], y=[qtd_grupos_3v, impacto_3v/1e6], marker_color='#FF6B6B'),
+            go.Bar(name='Consenso Moderado (2/3)', x=['Grupos', 'Impacto (R$ Mi)'], y=[qtd_grupos_2v, impacto_2v/1e6], marker_color='#FFA500')
+        ])
+        fig.update_layout(
+            title="Comparativo de Impacto Financeiro por Nível de Consenso",
+            barmode='group',
+            template=filtros['tema'],
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
         # ================================================================
         # SEÇÃO 6: EXPORTAR RESULTADOS
         # ================================================================
@@ -1546,25 +1740,29 @@ def analise_machine_learning(engine, dados, filtros):
                     'socios_compartilhados', 'receita_maxima', 'total_indicios',
                     'contas_compartilhadas'
                 ]
-                
+
                 df_display = grupos_eco[colunas_exibir].copy()
                 df_display['receita_maxima'] = df_display['receita_maxima'].apply(formatar_moeda)
-                
-                st.dataframe(df_display.head(50), width='stretch', hide_index=True)
+
+                # Configurar ProgressColumn para scores
+                column_config = gerar_column_config(df_display.columns.tolist())
+                st.dataframe(df_display.head(50), column_config=column_config, use_container_width=True, hide_index=True)
             else:
                 st.info("Nenhum grupo classificado como Grupo Econômico.")
-        
+
         with tab2:
             nao_grupos_df = df_grupos[df_grupos['eh_grupo_economico'] == 'Não é Grupo'].sort_values('score_ml_percentual', ascending=False)
-            
+
             if not nao_grupos_df.empty:
                 st.write(f"**{len(nao_grupos_df)} grupos classificados como Não é Grupo**")
-                
+
                 colunas_exibir = [
                     'num_grupo', 'score_ml_percentual', 'score_final_ccs', 'qtd_cnpjs'
                 ]
-                
-                st.dataframe(nao_grupos_df[colunas_exibir].head(50), width='stretch', hide_index=True)
+
+                # Configurar ProgressColumn para scores
+                column_config = gerar_column_config(colunas_exibir)
+                st.dataframe(nao_grupos_df[colunas_exibir].head(50), column_config=column_config, use_container_width=True, hide_index=True)
             else:
                 st.info("Todos grupos classificados como Grupo Econômico.")
         
@@ -5239,15 +5437,17 @@ def dashboard_executivo(dados, filtros):
     st.subheader("Top 15 Grupos Críticos")
     score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
     df_top = df.nlargest(15, score_col).copy()
-    
+
     if 'valor_max' in df_top.columns:
         df_top['Receita'] = df_top['valor_max'].apply(formatar_moeda)
-    
+
     colunas = ['num_grupo', score_col, 'qntd_cnpj',
                'Receita', 'qtd_total_indicios', 'nivel_risco_grupo_economico']
     colunas_exist = [c for c in colunas if c in df_top.columns]
 
-    st.dataframe(df_top[colunas_exist], width='stretch', hide_index=True)
+    # Configurar ProgressColumn para scores
+    column_config = gerar_column_config(colunas_exist)
+    st.dataframe(df_top[colunas_exist], column_config=column_config, use_container_width=True, hide_index=True)
 
     # =========================================================================
     # IMPACTO FISCAL - GRUPOS DE ALTO RISCO
@@ -5362,9 +5562,12 @@ def dashboard_executivo(dados, filtros):
 
         colunas_exibir = [c for c in colunas_exibir if c in df_display.columns]
 
+        # Configurar ProgressColumn para scores
+        column_config = gerar_column_config(colunas_exibir)
         st.dataframe(
             df_display[colunas_exibir].sort_values(score_col, ascending=False),
-            width='stretch',
+            column_config=column_config,
+            use_container_width=True,
             hide_index=True
         )
 
@@ -5434,11 +5637,13 @@ def ranking_grupos(dados, filtros):
     fim = min(inicio + registros, len(df_sorted))
     
     df_pag = df_sorted.iloc[inicio:fim].copy()
-    
+
     if 'valor_max' in df_pag.columns:
         df_pag['valor_max'] = df_pag['valor_max'].apply(formatar_moeda)
-    
-    st.dataframe(df_pag, width='stretch', hide_index=True)
+
+    # Configurar ProgressColumn para scores
+    column_config = gerar_column_config(df_pag.columns.tolist())
+    st.dataframe(df_pag, column_config=column_config, use_container_width=True, hide_index=True)
     st.info(f"Mostrando {inicio+1} a {fim} de {len(df_sorted)}")
 
 # ====================================================================================
@@ -5966,14 +6171,16 @@ def menu_pagamentos(engine, dados, filtros):
     
     # Top grupos por risco de confusão patrimonial
     st.subheader("Top 20 Grupos - Maior Risco de Confusão Patrimonial")
-    
+
     df_top = df_pag[df_pag['valor_meios_pagamento_empresas'] > 0].nlargest(20, 'indice_risco_pagamentos').copy()
     df_top['Valor Empresas'] = df_top['valor_meios_pagamento_empresas'].apply(formatar_moeda)
     df_top['Valor Sócios'] = df_top['valor_meios_pagamento_socios'].apply(formatar_moeda)
-    
-    st.dataframe(df_top[['num_grupo', 'indice_risco_pagamentos', 'Valor Empresas', 'Valor Sócios',
-                         'qntd_cnpj', score_col]],
-                width='stretch', hide_index=True)
+
+    colunas_pag = ['num_grupo', 'indice_risco_pagamentos', 'Valor Empresas', 'Valor Sócios',
+                   'qntd_cnpj', score_col]
+    # Configurar ProgressColumn para índices e scores
+    column_config = gerar_column_config(colunas_pag)
+    st.dataframe(df_top[colunas_pag], column_config=column_config, use_container_width=True, hide_index=True)
 
     # =========================================================================
     # DRILL DOWN POR GRUPO
@@ -6067,31 +6274,35 @@ def menu_funcionarios(engine, dados, filtros):
     
     # Top grupos com maior desproporção
     st.subheader("Top 20 Grupos - Alta Receita / Poucos Funcionários")
-    
+
     if 'indice_risco_fat_func' in df_func.columns:
         df_top = df_func[
-            (df_func['valor_max'] > 1000000) & 
+            (df_func['valor_max'] > 1000000) &
             (df_func['total_funcionarios'] <= 10)
         ].nlargest(20, 'indice_risco_fat_func').copy()
-        
+
         df_top['Faturamento'] = df_top['valor_max'].apply(formatar_moeda)
-        
-        st.dataframe(df_top[['num_grupo', 'indice_risco_fat_func', 'Faturamento', 
-                             'total_funcionarios', 'qntd_cnpj', score_col]], 
-                    width='stretch', hide_index=True)
+
+        colunas_func = ['num_grupo', 'indice_risco_fat_func', 'Faturamento',
+                        'total_funcionarios', 'qntd_cnpj', score_col]
+        # Configurar ProgressColumn para índices e scores
+        column_config = gerar_column_config(colunas_func)
+        st.dataframe(df_top[colunas_func], column_config=column_config, use_container_width=True, hide_index=True)
     else:
         # Fallback se não tiver o índice
         df_top = df_func[
-            (df_func['valor_max'] > 1000000) & 
+            (df_func['valor_max'] > 1000000) &
             (df_func['total_funcionarios'] <= 10)
         ].nlargest(20, 'valor_max').copy()
-        
+
         df_top['Faturamento'] = df_top['valor_max'].apply(formatar_moeda)
         df_top['Receita_por_Funcionario'] = df_top['valor_max'] / df_top['total_funcionarios']
-        
-        st.dataframe(df_top[['num_grupo', 'Faturamento', 'total_funcionarios',
-                             'Receita_por_Funcionario', 'qntd_cnpj', score_col]],
-                    width='stretch', hide_index=True)
+
+        colunas_func = ['num_grupo', 'Faturamento', 'total_funcionarios',
+                        'Receita_por_Funcionario', 'qntd_cnpj', score_col]
+        # Configurar ProgressColumn para scores
+        column_config = gerar_column_config(colunas_func)
+        st.dataframe(df_top[colunas_func], column_config=column_config, use_container_width=True, hide_index=True)
 
     # =========================================================================
     # DRILL DOWN POR GRUPO
@@ -6173,13 +6384,15 @@ def menu_c115(engine, dados, filtros):
     
     # Top 30 Grupos por Risco C115
     st.subheader("Top 30 Grupos - Maior Risco C115")
-    
+
     df_top = df_c115.nlargest(30, 'indice_risco_grupo_economico')
-    
-    st.dataframe(df_top[['num_grupo', 'ranking_risco', 'nivel_risco_grupo_economico',
-                         'indice_risco_grupo_economico', 'total_cnpjs', 'qtd_cnpjs_relacionados',
-                         'perc_cnpjs_relacionados', 'pares_com_tres_tipos_comum']], 
-                width='stretch', hide_index=True)
+
+    colunas_c115 = ['num_grupo', 'ranking_risco', 'nivel_risco_grupo_economico',
+                    'indice_risco_grupo_economico', 'total_cnpjs', 'qtd_cnpjs_relacionados',
+                    'perc_cnpjs_relacionados', 'pares_com_tres_tipos_comum']
+    # Configurar ProgressColumn para índices e percentuais
+    column_config = gerar_column_config(colunas_c115)
+    st.dataframe(df_top[colunas_c115], column_config=column_config, use_container_width=True, hide_index=True)
     
     # Análise Detalhada
     st.subheader("Análise Detalhada por Grupo")
@@ -6282,9 +6495,9 @@ def menu_ccs(engine, dados, filtros):
     
     # Top Grupos por Risco CCS
     st.subheader("Top 30 Grupos - Maior Risco CCS")
-    
+
     df_top = df_ccs[df_ccs['qtd_contas_compartilhadas'] > 0].nlargest(30, 'indice_risco_ccs')
-    
+
     # Montar lista de colunas dinamicamente
     colunas_exibir = ['num_grupo', 'indice_risco_ccs']
     if 'nivel_risco_ccs' in df_top.columns:
@@ -6292,8 +6505,10 @@ def menu_ccs(engine, dados, filtros):
     colunas_exibir.extend(['qtd_contas_compartilhadas', 'perc_contas_compartilhadas',
                           'max_cnpjs_por_conta', 'qtd_sobreposicoes_responsaveis',
                           'media_dias_sobreposicao', 'qntd_cnpj', score_col])
-    
-    st.dataframe(df_top[colunas_exibir])
+
+    # Configurar ProgressColumn para índices e percentuais
+    column_config = gerar_column_config(colunas_exibir)
+    st.dataframe(df_top[colunas_exibir], column_config=column_config, use_container_width=True, hide_index=True)
     
     # Análise Detalhada por Grupo
     st.subheader("Análise Detalhada por Grupo")
@@ -6829,9 +7044,12 @@ def indicios_fiscais(dados, filtros):
     st.subheader("Top 30 Grupos com Mais Indícios")
     df_top = df.nlargest(30, 'qtd_total_indicios')
     score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
-    st.dataframe(df_top[['num_grupo', 'qtd_total_indicios', 'qtd_tipos_indicios_distintos',
-                        score_col, 'qntd_cnpj']],
-                width='stretch', hide_index=True)
+
+    colunas_indicios = ['num_grupo', 'qtd_total_indicios', 'qtd_tipos_indicios_distintos',
+                        score_col, 'qntd_cnpj']
+    # Configurar ProgressColumn para scores
+    column_config = gerar_column_config(colunas_indicios)
+    st.dataframe(df_top[colunas_indicios], column_config=column_config, use_container_width=True, hide_index=True)
 
     # =========================================================================
     # DRILL DOWN POR GRUPO
