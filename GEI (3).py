@@ -4112,15 +4112,17 @@ def analise_pontual(engine, dados, filtros):
             "🏦 Contas Bancárias",
             "👔 Funcionários",
             "💳 Pagamentos",
+            "⚡ Energia Elétrica",
+            "📞 Telecomunicações",
             "📊 Score Final"
         ])
-        
+
         # ===================================================================
         # TAB 1: ANÁLISE DE DADOS CADASTRAIS
         # ===================================================================
         with tabs_similaridade[0]:
             st.subheader("Consistência Cadastral")
-            
+
             if not resultados['cadastro'].empty and len(resultados['cadastro']) > 1:
                 cadastro_checks = []
                 
@@ -5190,11 +5192,148 @@ def analise_pontual(engine, dados, filtros):
                     st.info("Análise de meios de pagamento requer dados adicionais de sócios.")
             else:
                 st.warning("Dados de meios de pagamento insuficientes")
-        
+
         # ===================================================================
-        # TAB 9: SCORE FINAL E CONCLUSÃO
+        # TAB 9: ANÁLISE DE ENERGIA ELÉTRICA (NF3e)
         # ===================================================================
         with tabs_similaridade[8]:
+            st.subheader("Análise de Consumo de Energia Elétrica")
+
+            if 'nf3e' in resultados and not resultados['nf3e'].empty:
+                energia_checks = []
+                df_nf3e = resultados['nf3e']
+
+                # Verificar se há CNPJs com consumo
+                max_score_possivel += 2
+                cnpjs_com_energia = len(df_nf3e)
+
+                if cnpjs_com_energia > 0:
+                    st.write(f"**{cnpjs_com_energia} CNPJs com dados de energia elétrica**")
+
+                    # Calcular último valor disponível
+                    meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025',
+                                 'mar2025', 'fev2025', 'jan2025', 'dez2024', 'nov2024', 'out2024']
+
+                    def get_ultimo_valor(row):
+                        for mes in meses_cols:
+                            if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                                return row[mes]
+                        return 0
+
+                    df_nf3e['consumo_12m'] = df_nf3e.apply(get_ultimo_valor, axis=1)
+                    df_energia_validos = df_nf3e[df_nf3e['consumo_12m'] > 0]
+
+                    if len(df_energia_validos) >= 2:
+                        # Comparar padrão de consumo entre CNPJs
+                        consumo_medio = df_energia_validos['consumo_12m'].mean()
+                        consumo_std = df_energia_validos['consumo_12m'].std()
+                        cv = (consumo_std / consumo_medio * 100) if consumo_medio > 0 else 0
+
+                        st.write(f"• Consumo médio: {formatar_moeda(consumo_medio)}")
+                        st.write(f"• Coeficiente de variação: {cv:.1f}%")
+
+                        # Se consumo é muito similar (CV baixo), pode indicar padrão
+                        if cv < 50:
+                            energia_checks.append({
+                                'Indicador': 'Padrão de Consumo Similar',
+                                'Valor': f'CV = {cv:.1f}%',
+                                'Status': '✅ SIMILAR',
+                                'Pontos': 1,
+                                'Avaliação': 'Consumo proporcional similar'
+                            })
+                            evidencias['energia_similar'] = True
+                            score_similaridade += 1
+
+                        # Verificar se há fornecedores em comum
+                        total_consumo = df_energia_validos['consumo_12m'].sum()
+                        energia_checks.append({
+                            'Indicador': 'Consumo Total do Grupo',
+                            'Valor': formatar_moeda(total_consumo),
+                            'Status': '📊 REGISTRADO',
+                            'Pontos': 0,
+                            'Avaliação': 'Informativo'
+                        })
+
+                    if energia_checks:
+                        df_energia_tab = pd.DataFrame(energia_checks)
+                        st.dataframe(df_energia_tab, width='stretch', hide_index=True)
+                else:
+                    st.info("Nenhum CNPJ com consumo de energia detectado")
+            else:
+                st.warning("Dados de energia elétrica não disponíveis para análise")
+
+        # ===================================================================
+        # TAB 10: ANÁLISE DE TELECOMUNICAÇÕES (NFCom)
+        # ===================================================================
+        with tabs_similaridade[9]:
+            st.subheader("Análise de Consumo de Telecomunicações")
+
+            if 'nfcom' in resultados and not resultados['nfcom'].empty:
+                telecom_checks = []
+                df_nfcom = resultados['nfcom']
+
+                # Verificar se há CNPJs com consumo
+                max_score_possivel += 2
+                cnpjs_com_telecom = len(df_nfcom)
+
+                if cnpjs_com_telecom > 0:
+                    st.write(f"**{cnpjs_com_telecom} CNPJs com dados de telecomunicações**")
+
+                    # Calcular último valor disponível
+                    meses_cols = ['set2025', 'ago2025', 'jul2025', 'jun2025', 'mai2025', 'abr2025',
+                                 'mar2025', 'fev2025', 'jan2025', 'dez2024', 'nov2024', 'out2024']
+
+                    def get_ultimo_valor_tel(row):
+                        for mes in meses_cols:
+                            if mes in row and pd.notna(row[mes]) and row[mes] > 0:
+                                return row[mes]
+                        return 0
+
+                    df_nfcom['consumo_12m'] = df_nfcom.apply(get_ultimo_valor_tel, axis=1)
+                    df_telecom_validos = df_nfcom[df_nfcom['consumo_12m'] > 0]
+
+                    if len(df_telecom_validos) >= 2:
+                        # Comparar padrão de consumo entre CNPJs
+                        consumo_medio = df_telecom_validos['consumo_12m'].mean()
+                        consumo_std = df_telecom_validos['consumo_12m'].std()
+                        cv = (consumo_std / consumo_medio * 100) if consumo_medio > 0 else 0
+
+                        st.write(f"• Consumo médio: {formatar_moeda(consumo_medio)}")
+                        st.write(f"• Coeficiente de variação: {cv:.1f}%")
+
+                        # Se consumo é muito similar (CV baixo), pode indicar padrão
+                        if cv < 50:
+                            telecom_checks.append({
+                                'Indicador': 'Padrão de Consumo Similar',
+                                'Valor': f'CV = {cv:.1f}%',
+                                'Status': '✅ SIMILAR',
+                                'Pontos': 1,
+                                'Avaliação': 'Consumo proporcional similar'
+                            })
+                            evidencias['telecom_similar'] = True
+                            score_similaridade += 1
+
+                        total_consumo = df_telecom_validos['consumo_12m'].sum()
+                        telecom_checks.append({
+                            'Indicador': 'Consumo Total do Grupo',
+                            'Valor': formatar_moeda(total_consumo),
+                            'Status': '📊 REGISTRADO',
+                            'Pontos': 0,
+                            'Avaliação': 'Informativo'
+                        })
+
+                    if telecom_checks:
+                        df_telecom_tab = pd.DataFrame(telecom_checks)
+                        st.dataframe(df_telecom_tab, width='stretch', hide_index=True)
+                else:
+                    st.info("Nenhum CNPJ com consumo de telecomunicações detectado")
+            else:
+                st.warning("Dados de telecomunicações não disponíveis para análise")
+
+        # ===================================================================
+        # TAB 11: SCORE FINAL E CONCLUSÃO
+        # ===================================================================
+        with tabs_similaridade[10]:
             st.subheader("📊 Score Final de Similaridade")
             
             # Métricas principais
@@ -6977,29 +7116,53 @@ def menu_energia(engine, dados, filtros):
 
         if grupo_sel and grupo_sel != 'Selecione...':
             try:
-                # Carregar dados detalhados
+                # Carregar dados detalhados da tabela correta (gei_nf3e_detalhado)
                 query_det = f"""
                 SELECT
                     cnpj,
-                    jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
-                    jul2024, ago2024, set2024, out2024, nov2024, dez2024,
-                    jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
-                    jul2025, ago2025, set2025
-                FROM gessimples.gei_nf3e
-                WHERE cnpj IN (
-                    SELECT cnpj FROM gessimples.gei_cnpj WHERE num_grupo = '{grupo_sel}'
-                )
+                    ano_emissao,
+                    mes_emissao,
+                    vl_energia_mensal,
+                    qt_notas,
+                    qt_fornecedores
+                FROM gessimples.gei_nf3e_detalhado
+                WHERE num_grupo = '{grupo_sel}'
+                ORDER BY cnpj, ano_emissao, mes_emissao
                 """
                 df_det = pd.read_sql(query_det, engine)
 
                 if not df_det.empty:
                     st.write(f"**Consumo de energia por CNPJ do Grupo {grupo_sel}:**")
 
-                    # Mostrar tabela
-                    meses_cols = [c for c in df_det.columns if c != 'cnpj']
-                    df_show = df_det.copy()
-                    for col in meses_cols:
-                        df_show[col] = df_show[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) and x > 0 else '-')
+                    # Criar coluna de período
+                    df_det['periodo'] = df_det['ano_emissao'].astype(str) + '/' + df_det['mes_emissao'].astype(str).str.zfill(2)
+
+                    # Métricas gerais
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("CNPJs com Consumo", df_det['cnpj'].nunique())
+                    with col2:
+                        st.metric("Consumo Total", formatar_moeda(df_det['vl_energia_mensal'].sum()))
+                    with col3:
+                        st.metric("Total de Notas", f"{df_det['qt_notas'].sum():,}")
+                    with col4:
+                        st.metric("Meses com Dados", df_det['periodo'].nunique())
+
+                    st.divider()
+
+                    # Pivot para mostrar por CNPJ e período
+                    df_pivot = df_det.pivot_table(
+                        index='cnpj',
+                        columns='periodo',
+                        values='vl_energia_mensal',
+                        aggfunc='sum',
+                        fill_value=0
+                    ).reset_index()
+
+                    # Formatar valores
+                    df_show = df_pivot.copy()
+                    for col in df_show.columns[1:]:
+                        df_show[col] = df_show[col].apply(lambda x: formatar_moeda(x) if x > 0 else '-')
 
                     st.dataframe(df_show, hide_index=True, use_container_width=True)
 
@@ -7007,12 +7170,14 @@ def menu_energia(engine, dados, filtros):
                     st.divider()
                     st.write("**Evolução do Consumo:**")
 
-                    df_melt = df_det.melt(id_vars=['cnpj'], var_name='periodo', value_name='consumo')
-                    df_total = df_melt.groupby('periodo')['consumo'].sum().reset_index()
+                    df_total = df_det.groupby('periodo')['vl_energia_mensal'].sum().reset_index()
+                    df_total = df_total.sort_values('periodo')
 
-                    fig = px.line(df_total, x='periodo', y='consumo',
+                    fig = px.line(df_total, x='periodo', y='vl_energia_mensal',
                                  title=f"Consumo Total de Energia - Grupo {grupo_sel}",
-                                 template=filtros['tema'])
+                                 labels={'vl_energia_mensal': 'Valor (R$)', 'periodo': 'Período'},
+                                 template=filtros['tema'],
+                                 markers=True)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("Nenhum dado de energia encontrado para este grupo.")
@@ -7217,29 +7382,53 @@ def menu_telecom(engine, dados, filtros):
 
         if grupo_sel and grupo_sel != 'Selecione...':
             try:
-                # Carregar dados detalhados
+                # Carregar dados detalhados da tabela correta (gei_nfcom_detalhado)
                 query_det = f"""
                 SELECT
                     cnpj,
-                    jan2024, fev2024, mar2024, abr2024, mai2024, jun2024,
-                    jul2024, ago2024, set2024, out2024, nov2024, dez2024,
-                    jan2025, fev2025, mar2025, abr2025, mai2025, jun2025,
-                    jul2025, ago2025, set2025
-                FROM gessimples.gei_nfcom
-                WHERE cnpj IN (
-                    SELECT cnpj FROM gessimples.gei_cnpj WHERE num_grupo = '{grupo_sel}'
-                )
+                    ano_emissao,
+                    mes_emissao,
+                    vl_telecom_mensal,
+                    qt_notas,
+                    qt_operadoras
+                FROM gessimples.gei_nfcom_detalhado
+                WHERE num_grupo = '{grupo_sel}'
+                ORDER BY cnpj, ano_emissao, mes_emissao
                 """
                 df_det = pd.read_sql(query_det, engine)
 
                 if not df_det.empty:
                     st.write(f"**Consumo de telecomunicações por CNPJ do Grupo {grupo_sel}:**")
 
-                    # Mostrar tabela
-                    meses_cols = [c for c in df_det.columns if c != 'cnpj']
-                    df_show = df_det.copy()
-                    for col in meses_cols:
-                        df_show[col] = df_show[col].apply(lambda x: formatar_moeda(x) if pd.notna(x) and x > 0 else '-')
+                    # Criar coluna de período
+                    df_det['periodo'] = df_det['ano_emissao'].astype(str) + '/' + df_det['mes_emissao'].astype(str).str.zfill(2)
+
+                    # Métricas gerais
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("CNPJs com Consumo", df_det['cnpj'].nunique())
+                    with col2:
+                        st.metric("Consumo Total", formatar_moeda(df_det['vl_telecom_mensal'].sum()))
+                    with col3:
+                        st.metric("Total de Notas", f"{df_det['qt_notas'].sum():,}")
+                    with col4:
+                        st.metric("Meses com Dados", df_det['periodo'].nunique())
+
+                    st.divider()
+
+                    # Pivot para mostrar por CNPJ e período
+                    df_pivot = df_det.pivot_table(
+                        index='cnpj',
+                        columns='periodo',
+                        values='vl_telecom_mensal',
+                        aggfunc='sum',
+                        fill_value=0
+                    ).reset_index()
+
+                    # Formatar valores
+                    df_show = df_pivot.copy()
+                    for col in df_show.columns[1:]:
+                        df_show[col] = df_show[col].apply(lambda x: formatar_moeda(x) if x > 0 else '-')
 
                     st.dataframe(df_show, hide_index=True, use_container_width=True)
 
@@ -7247,12 +7436,14 @@ def menu_telecom(engine, dados, filtros):
                     st.divider()
                     st.write("**Evolução do Consumo:**")
 
-                    df_melt = df_det.melt(id_vars=['cnpj'], var_name='periodo', value_name='consumo')
-                    df_total = df_melt.groupby('periodo')['consumo'].sum().reset_index()
+                    df_total = df_det.groupby('periodo')['vl_telecom_mensal'].sum().reset_index()
+                    df_total = df_total.sort_values('periodo')
 
-                    fig = px.line(df_total, x='periodo', y='consumo',
+                    fig = px.line(df_total, x='periodo', y='vl_telecom_mensal',
                                  title=f"Consumo Total de Telecomunicações - Grupo {grupo_sel}",
-                                 template=filtros['tema'])
+                                 labels={'vl_telecom_mensal': 'Valor (R$)', 'periodo': 'Período'},
+                                 template=filtros['tema'],
+                                 markers=True)
                     st.plotly_chart(fig, use_container_width=True)
 
                     # Operadoras do grupo
@@ -8683,6 +8874,8 @@ def dossie_grupo(engine, dados, filtros):
                 "🏦 Contas Bancárias",
                 "👔 Funcionários",
                 "💳 Pagamentos",
+                "⚡ Energia Elétrica",
+                "📞 Telecomunicações",
                 "📊 Score Final"
             ])
 
@@ -9327,9 +9520,143 @@ def dossie_grupo(engine, dados, filtros):
                     st.warning("Dados de meios de pagamento insuficientes")
 
             # ===================================================================
-            # TAB 9: SCORE FINAL E CONCLUSÃO
+            # TAB 9: ANÁLISE DE ENERGIA ELÉTRICA (NF3e)
             # ===================================================================
             with tabs_similaridade[8]:
+                st.subheader("Análise de Consumo de Energia Elétrica")
+
+                if 'nf3e' in dossie and not dossie['nf3e'].empty:
+                    energia_checks = []
+                    df_nf3e = dossie['nf3e']
+
+                    # Verificar se há CNPJs com consumo
+                    max_score_possivel += 2
+                    cnpjs_com_energia = len(df_nf3e)
+
+                    if cnpjs_com_energia > 0:
+                        st.write(f"**{cnpjs_com_energia} CNPJs com dados de energia elétrica**")
+
+                        # Calcular consumo acumulado (usar colunas de meses se disponíveis)
+                        meses_cols = [c for c in df_nf3e.columns if '202' in str(c)]
+                        if meses_cols:
+                            df_nf3e['consumo_total'] = df_nf3e[meses_cols].sum(axis=1)
+                            df_energia_validos = df_nf3e[df_nf3e['consumo_total'] > 0]
+
+                            if len(df_energia_validos) >= 2:
+                                consumo_medio = df_energia_validos['consumo_total'].mean()
+                                consumo_std = df_energia_validos['consumo_total'].std()
+                                cv = (consumo_std / consumo_medio * 100) if consumo_medio > 0 else 0
+
+                                st.write(f"• Consumo médio por CNPJ: {formatar_moeda(consumo_medio)}")
+                                st.write(f"• Coeficiente de variação: {cv:.1f}%")
+
+                                if cv < 50:
+                                    energia_checks.append({
+                                        'Indicador': 'Padrão de Consumo Similar',
+                                        'Valor': f'CV = {cv:.1f}%',
+                                        'Status': '✅ SIMILAR',
+                                        'Pontos': 1,
+                                        'Avaliação': 'Consumo proporcional similar'
+                                    })
+                                    evidencias['energia_similar'] = True
+                                    score_similaridade += 1
+
+                                total_consumo = df_energia_validos['consumo_total'].sum()
+                                energia_checks.append({
+                                    'Indicador': 'Consumo Total do Grupo',
+                                    'Valor': formatar_moeda(total_consumo),
+                                    'Status': '📊 REGISTRADO',
+                                    'Pontos': 0,
+                                    'Avaliação': 'Informativo'
+                                })
+
+                                # Tabela detalhada
+                                st.divider()
+                                df_show = df_energia_validos[['cnpj', 'consumo_total']].copy()
+                                df_show['consumo_total'] = df_show['consumo_total'].apply(formatar_moeda)
+                                df_show.columns = ['CNPJ', 'Consumo Total']
+                                st.dataframe(df_show, hide_index=True)
+
+                        if energia_checks:
+                            st.divider()
+                            df_energia_tab = pd.DataFrame(energia_checks)
+                            st.dataframe(df_energia_tab, width='stretch', hide_index=True)
+                    else:
+                        st.info("Nenhum CNPJ com consumo de energia detectado")
+                else:
+                    st.warning("Dados de energia elétrica não disponíveis para análise")
+
+            # ===================================================================
+            # TAB 10: ANÁLISE DE TELECOMUNICAÇÕES (NFCom)
+            # ===================================================================
+            with tabs_similaridade[9]:
+                st.subheader("Análise de Consumo de Telecomunicações")
+
+                if 'nfcom' in dossie and not dossie['nfcom'].empty:
+                    telecom_checks = []
+                    df_nfcom = dossie['nfcom']
+
+                    # Verificar se há CNPJs com consumo
+                    max_score_possivel += 2
+                    cnpjs_com_telecom = len(df_nfcom)
+
+                    if cnpjs_com_telecom > 0:
+                        st.write(f"**{cnpjs_com_telecom} CNPJs com dados de telecomunicações**")
+
+                        # Calcular consumo acumulado
+                        meses_cols = [c for c in df_nfcom.columns if '202' in str(c)]
+                        if meses_cols:
+                            df_nfcom['consumo_total'] = df_nfcom[meses_cols].sum(axis=1)
+                            df_telecom_validos = df_nfcom[df_nfcom['consumo_total'] > 0]
+
+                            if len(df_telecom_validos) >= 2:
+                                consumo_medio = df_telecom_validos['consumo_total'].mean()
+                                consumo_std = df_telecom_validos['consumo_total'].std()
+                                cv = (consumo_std / consumo_medio * 100) if consumo_medio > 0 else 0
+
+                                st.write(f"• Consumo médio por CNPJ: {formatar_moeda(consumo_medio)}")
+                                st.write(f"• Coeficiente de variação: {cv:.1f}%")
+
+                                if cv < 50:
+                                    telecom_checks.append({
+                                        'Indicador': 'Padrão de Consumo Similar',
+                                        'Valor': f'CV = {cv:.1f}%',
+                                        'Status': '✅ SIMILAR',
+                                        'Pontos': 1,
+                                        'Avaliação': 'Consumo proporcional similar'
+                                    })
+                                    evidencias['telecom_similar'] = True
+                                    score_similaridade += 1
+
+                                total_consumo = df_telecom_validos['consumo_total'].sum()
+                                telecom_checks.append({
+                                    'Indicador': 'Consumo Total do Grupo',
+                                    'Valor': formatar_moeda(total_consumo),
+                                    'Status': '📊 REGISTRADO',
+                                    'Pontos': 0,
+                                    'Avaliação': 'Informativo'
+                                })
+
+                                # Tabela detalhada
+                                st.divider()
+                                df_show = df_telecom_validos[['cnpj', 'consumo_total']].copy()
+                                df_show['consumo_total'] = df_show['consumo_total'].apply(formatar_moeda)
+                                df_show.columns = ['CNPJ', 'Consumo Total']
+                                st.dataframe(df_show, hide_index=True)
+
+                        if telecom_checks:
+                            st.divider()
+                            df_telecom_tab = pd.DataFrame(telecom_checks)
+                            st.dataframe(df_telecom_tab, width='stretch', hide_index=True)
+                    else:
+                        st.info("Nenhum CNPJ com consumo de telecomunicações detectado")
+                else:
+                    st.warning("Dados de telecomunicações não disponíveis para análise")
+
+            # ===================================================================
+            # TAB 11: SCORE FINAL E CONCLUSÃO
+            # ===================================================================
+            with tabs_similaridade[10]:
                 st.subheader("📊 Score Final de Similaridade")
 
                 # Métricas principais
