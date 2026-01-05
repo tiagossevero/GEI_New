@@ -171,7 +171,6 @@ st.markdown("""
         cursor: pointer;
         z-index: 1000;
     }
-</style>
 
     /* =========================================================================
        ESTILOS DE AJUDA/TOOLTIP - UX MELHORADA
@@ -11060,90 +11059,125 @@ def menu_mapa(engine, dados, filtros):
 
 def main():
     """Função principal do sistema"""
-    
+
     # Sidebar com navegação
-    st.sidebar.title("Sistema GEI v3.0")
-    
-    paginas = [
-        "Dashboard Executivo",
-        "Ranking",
-        "Análise Pontual",
-        "Contadores",
-        "Meios de Pagamento",
-        "Funcionários",
-        "Convênio 115",
-        "Procuração Bancária (CCS)",
-        "Financeiro",
-        "⚡ Energia Elétrica",
-        "📱 Telecomunicações",
-        "Inconsistências NFe",
-        "Indícios Fiscais",
-        "Vínculos Societários",
-        "Dossiê do Grupo",
+    st.sidebar.title("🏛️ Sistema GEI v3.0")
+
+    # Inicializar página na sessão se não existir
+    if 'pagina_atual' not in st.session_state:
+        st.session_state.pagina_atual = "📊 Dashboard Executivo"
+
+    # Menu principal
+    st.sidebar.markdown("### 📌 Menu Principal")
+
+    paginas_principais = [
+        "📊 Dashboard Executivo",
+        "🏆 Ranking",
+        "👤 Contadores",
+        "📁 Dossiê do Grupo",
+        "🔍 Análise Pontual",
         "🗺️ Mapa",
         "🤖 Machine Learning",
-        "Análises"
+        "📈 Análises"
     ]
-    
-    pag = st.sidebar.radio("Navegação:", paginas)  # USE APENAS UMA VARIÁVEL
-    
+
+    pag_principal = st.sidebar.radio(
+        "Navegação:",
+        paginas_principais,
+        key="menu_principal",
+        label_visibility="collapsed"
+    )
+
+    # Dimensões em expander
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("📂 Dimensões de Análise", expanded=False):
+        dimensoes = [
+            "💳 Meios de Pagamento (DIMP)",
+            "👷 Funcionários (RAIS/CAGED)",
+            "📋 Convênio 115",
+            "🏦 Procuração Bancária (CCS)",
+            "💰 Financeiro (PGDAS/DIME)",
+            "⚡ Energia Elétrica (NF3e)",
+            "📱 Telecomunicações (NFCom)",
+            "⚠️ Inconsistências NFe/NFCe",
+            "🚨 Indícios Fiscais (NEAF)",
+            "🤝 Vínculos Societários (JUCESC)"
+        ]
+
+        dimensao_selecionada = st.radio(
+            "Selecione a dimensão:",
+            ["Nenhuma"] + dimensoes,
+            key="menu_dimensoes",
+            label_visibility="collapsed"
+        )
+
+    # Determinar página atual
+    if dimensao_selecionada != "Nenhuma":
+        pag = dimensao_selecionada
+    else:
+        pag = pag_principal
+
+    st.sidebar.markdown("---")
+
     # Filtros
     filtros = criar_filtros_sidebar()
-    
+
     # Conexão com o banco
     engine = get_impala_engine()
-    
+
     if engine is None:
         st.stop()
-    
+
     st.sidebar.success("✅ Conectado ao Impala")
-    
+
     # Carregamento dos dados
     dados = carregar_todos_os_dados(engine)
-    
+
     if not dados or dados['percent'].empty:
         st.error("Erro ao carregar dados principais")
         return
-    
+
     st.sidebar.info(f"📊 {len(dados['percent']):,} grupos carregados")
-    
-    # Roteamento das páginas
-    if pag == "Dashboard Executivo":
+
+    # Roteamento das páginas - Menu Principal
+    if pag == "📊 Dashboard Executivo":
         dashboard_executivo(dados, filtros)
-    elif pag == "Ranking":
+    elif pag == "🏆 Ranking":
         ranking_grupos(dados, filtros)
-    elif pag == "Análise Pontual":
-        analise_pontual(engine, dados, filtros)    
-    elif pag == "Contadores":
+    elif pag == "🔍 Análise Pontual":
+        analise_pontual(engine, dados, filtros)
+    elif pag == "👤 Contadores":
         menu_contadores(engine, dados, filtros)
-    elif pag == "Meios de Pagamento":
-        menu_pagamentos(engine, dados, filtros)
-    elif pag == "Funcionários":
-        menu_funcionarios(engine, dados, filtros)
-    elif pag == "Convênio 115":
-        menu_c115(engine, dados, filtros)
-    elif pag == "Procuração Bancária (CCS)":
-        menu_ccs(engine, dados, filtros)
-    elif pag == "Financeiro":
-        menu_financeiro(engine, dados, filtros)
-    elif pag == "⚡ Energia Elétrica":
-        menu_energia(engine, dados, filtros)
-    elif pag == "📱 Telecomunicações":
-        menu_telecom(engine, dados, filtros)
-    elif pag == "Inconsistências NFe":
-        inconsistencias_nfe(engine, dados, filtros)
-    elif pag == "Indícios Fiscais":
-        indicios_fiscais(dados, filtros)
-    elif pag == "Vínculos Societários":
-        vinculos_societarios(dados, filtros)
-    elif pag == "Dossiê do Grupo":
+    elif pag == "📁 Dossiê do Grupo":
         dossie_grupo(engine, dados, filtros)
     elif pag == "🗺️ Mapa":
         menu_mapa(engine, dados, filtros)
     elif pag == "🤖 Machine Learning":
         analise_machine_learning(engine, dados, filtros)
-    elif pag == "Análises":
+    elif pag == "📈 Análises":
         menu_analises(engine, dados, filtros)
+
+    # Roteamento das páginas - Dimensões
+    elif pag == "💳 Meios de Pagamento (DIMP)":
+        menu_pagamentos(engine, dados, filtros)
+    elif pag == "👷 Funcionários (RAIS/CAGED)":
+        menu_funcionarios(engine, dados, filtros)
+    elif pag == "📋 Convênio 115":
+        menu_c115(engine, dados, filtros)
+    elif pag == "🏦 Procuração Bancária (CCS)":
+        menu_ccs(engine, dados, filtros)
+    elif pag == "💰 Financeiro (PGDAS/DIME)":
+        menu_financeiro(engine, dados, filtros)
+    elif pag == "⚡ Energia Elétrica (NF3e)":
+        menu_energia(engine, dados, filtros)
+    elif pag == "📱 Telecomunicações (NFCom)":
+        menu_telecom(engine, dados, filtros)
+    elif pag == "⚠️ Inconsistências NFe/NFCe":
+        inconsistencias_nfe(engine, dados, filtros)
+    elif pag == "🚨 Indícios Fiscais (NEAF)":
+        indicios_fiscais(dados, filtros)
+    elif pag == "🤝 Vínculos Societários (JUCESC)":
+        vinculos_societarios(dados, filtros)
     
     # Rodapé
     st.markdown("---")
