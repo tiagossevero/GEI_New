@@ -172,7 +172,364 @@ st.markdown("""
         z-index: 1000;
     }
 </style>
+
+    /* =========================================================================
+       ESTILOS DE AJUDA/TOOLTIP - UX MELHORADA
+       ========================================================================= */
+
+    /* Estilo do ícone de ajuda nos KPIs */
+    div[data-testid="stMetric"] svg[data-testid="stTooltipHoverTarget"] {
+        color: #1565C0 !important;
+        opacity: 0.8;
+        transition: opacity 0.2s ease;
+    }
+
+    div[data-testid="stMetric"] svg[data-testid="stTooltipHoverTarget"]:hover {
+        opacity: 1;
+        color: #0D47A1 !important;
+    }
+
+    /* Estilo para cards de informação */
+    .info-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 4px solid #1565C0;
+    }
+
+    .info-card-title {
+        font-weight: 600;
+        color: #1565C0;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+    }
+
+    .info-card-content {
+        color: #555;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+
+    /* Legenda de cores/níveis */
+    .legenda-container {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+        margin: 15px 0;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+    }
+
+    .legenda-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.8rem;
+    }
+
+    .legenda-cor {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+    }
+
+    /* Seção de ajuda expandível */
+    .help-section {
+        background-color: #e3f2fd;
+        border-radius: 8px;
+        padding: 12px 15px;
+        margin: 10px 0;
+        border: 1px solid #bbdefb;
+    }
+
+    .help-title {
+        color: #1565C0;
+        font-weight: 600;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .help-content {
+        color: #424242;
+        font-size: 0.85rem;
+        line-height: 1.6;
+    }
+
+    /* KPIs com níveis de risco */
+    .kpi-critico { border-left: 4px solid #d32f2f !important; }
+    .kpi-alto { border-left: 4px solid #f57c00 !important; }
+    .kpi-medio { border-left: 4px solid #fbc02d !important; }
+    .kpi-baixo { border-left: 4px solid #388e3c !important; }
+
+</style>
 """, unsafe_allow_html=True)
+
+# =============================================================================
+# DICIONÁRIO DE TOOLTIPS - EXPLICAÇÕES DOS INDICADORES
+# =============================================================================
+
+TOOLTIPS = {
+    # === KPIs GERAIS / DASHBOARD ===
+    "total_grupos": "Quantidade total de grupos econômicos identificados no sistema GEI. Um grupo econômico é formado por empresas que compartilham vínculos societários, cadastrais ou operacionais.",
+    "score_medio_gei": "Média dos scores calculados pelo sistema GEI. O score considera múltiplos fatores como vínculos societários, padrões cadastrais, inconsistências fiscais e comportamento operacional. Quanto maior, maior o risco.",
+    "score_medio_ml": "Score calculado por algoritmos de Machine Learning que analisam padrões nos dados. Considera 9 dimensões: cadastro, sócios, financeiro, C115, indícios, CCS, NFe, pagamentos e funcionários.",
+    "acima_limite_sn": "Grupos cuja soma das receitas das empresas no Simples Nacional ultrapassa R$ 4,8 milhões (limite de faturamento anual). Indica possível irregularidade no enquadramento tributário.",
+    "grupos_criticos": "Grupos com score de risco igual ou superior a 20 pontos, indicando alta probabilidade de irregularidades fiscais e necessidade de análise prioritária.",
+
+    # === MACHINE LEARNING / CONSENSO ===
+    "consenso_forte": "Grupos identificados como grupo econômico por TODOS os 3 algoritmos de ML (K-Means, DBSCAN e Isolation Forest). Alta confiança na classificação.",
+    "consenso_moderado": "Grupos identificados por 2 dos 3 algoritmos de ML. Confiança moderada - recomenda-se análise complementar.",
+    "consenso_fraco": "Grupos identificados por apenas 1 algoritmo de ML. Baixa confiança - requer análise detalhada para confirmação.",
+    "nao_grupo": "Entidades não identificadas como grupo econômico por nenhum algoritmo. Podem ser empresas isoladas ou casos que não apresentam padrões típicos de grupos.",
+    "concordancia_kmeans_dbscan": "Percentual de casos em que K-Means e DBSCAN concordam na classificação. Alta concordância indica padrões claros nos dados.",
+    "concordancia_kmeans_iforest": "Percentual de concordância entre K-Means e Isolation Forest. Compara detecção de clusters vs anomalias.",
+    "concordancia_dbscan_iforest": "Percentual de concordância entre DBSCAN e Isolation Forest na identificação de grupos.",
+    "silhouette_score": "Métrica de qualidade do clustering (-1 a 1). Valores próximos de 1 indicam clusters bem definidos; próximos de 0 indicam sobreposição; negativos indicam classificação incorreta.",
+
+    # === CADASTRO E VÍNCULOS ===
+    "qtd_cnpjs": "Quantidade de CNPJs (empresas) que fazem parte do grupo econômico.",
+    "socios_compartilhados": "Número de sócios (CPFs) que aparecem em mais de uma empresa do grupo. Indica vínculo societário direto.",
+    "max_empresas_socio": "Maior número de empresas em que um mesmo sócio participa dentro do grupo. Valores altos indicam concentração de controle.",
+    "indice_interconexao": "Índice que mede o grau de interligação societária no grupo (0 a 1). Calculado pela razão entre conexões existentes e possíveis.",
+    "perc_cnpjs_socios": "Percentual de empresas do grupo que possuem pelo menos um sócio em comum com outra empresa do grupo.",
+
+    # === CONTADORES ===
+    "total_contadores": "Quantidade de escritórios contábeis responsáveis pelas empresas analisadas.",
+    "media_score_contador": "Score médio dos grupos atendidos pelo contador. Contadores com média alta podem estar envolvidos em esquemas irregulares.",
+    "total_grupos_contador": "Quantidade total de grupos econômicos sob responsabilidade do contador.",
+    "gerfes_distintas": "Quantidade de Gerências Regionais de Fiscalização (GERFEs) diferentes onde o contador atua.",
+
+    # === MEIOS DE PAGAMENTO ===
+    "grupos_com_pagamentos": "Quantidade de grupos que possuem dados de meios de pagamento eletrônico registrados.",
+    "total_pagamentos_empresas": "Soma dos valores de transações eletrônicas realizadas pelas empresas dos grupos (cartões, PIX, etc.).",
+    "total_pagamentos_socios": "Soma dos valores de transações eletrônicas realizadas pelos sócios pessoas físicas dos grupos.",
+    "indice_risco_pagamentos": "Índice que compara o volume de pagamentos dos sócios vs empresas. Valores altos podem indicar desvio de recursos.",
+
+    # === FUNCIONÁRIOS ===
+    "total_funcionarios": "Quantidade total de funcionários com vínculo empregatício ativo nas empresas do grupo.",
+    "cnpjs_com_funcionarios": "Quantidade de empresas do grupo que possuem ao menos um funcionário registrado.",
+    "media_funcionarios_grupo": "Média de funcionários por grupo econômico.",
+    "indice_risco_fat_func": "Índice que relaciona faturamento por funcionário. Valores muito altos podem indicar subfaturamento ou irregularidades no vínculo empregatício.",
+    "receita_por_funcionario": "Valor médio de receita bruta dividido pelo número de funcionários. Comparar com média do setor para identificar anomalias.",
+
+    # === CONVÊNIO 115 (C115) ===
+    "ranking_risco_c115": "Posição do grupo no ranking de risco do Convênio 115, que trata da substituição tributária em telecomunicações e energia.",
+    "nivel_risco_c115": "Classificação qualitativa do risco: CRÍTICO (requer ação imediata), ALTO, MÉDIO ou BAIXO.",
+    "indice_risco_c115": "Índice numérico calculado com base no volume e padrão de compartilhamento de créditos entre empresas do grupo.",
+    "cnpjs_relacionados_c115": "Quantidade de CNPJs do grupo que possuem relacionamento de créditos tributários no C115.",
+    "perc_cnpjs_relacionados_c115": "Percentual de CNPJs do grupo envolvidos em compartilhamento de créditos C115.",
+    "total_tomadores_c115": "Quantidade total de tomadores de crédito tributário identificados no grupo.",
+    "tomadores_compartilhamento": "Tomadores que compartilham créditos com outras empresas do grupo.",
+    "total_compartilhamentos_c115": "Número total de operações de compartilhamento de créditos identificadas.",
+    "grupos_monitorados_c115": "Total de grupos econômicos sob monitoramento no módulo Convênio 115.",
+    "grupos_criticos_c115": "Grupos com nível de risco CRÍTICO no Convênio 115.",
+
+    # === CCS - CADASTRO DE CLIENTES DO SISTEMA FINANCEIRO ===
+    "grupos_dados_ccs": "Quantidade de grupos que possuem dados no Cadastro de Clientes do Sistema Financeiro Nacional.",
+    "grupos_compartilhamento_ccs": "Grupos onde foi identificado compartilhamento de contas bancárias entre empresas ou sócios.",
+    "contas_compartilhadas": "Número total de contas bancárias utilizadas por mais de uma empresa do grupo.",
+    "indice_risco_ccs": "Índice de risco calculado com base em compartilhamento de contas, sobreposição de responsáveis e padrões coordenados.",
+    "nivel_risco_ccs": "Classificação do risco CCS: CRÍTICO, ALTO, MÉDIO ou BAIXO.",
+    "max_cnpjs_conta": "Maior quantidade de CNPJs diferentes que utilizam uma mesma conta bancária.",
+    "sobreposicoes_responsaveis": "Casos onde a mesma pessoa foi responsável por diferentes empresas em períodos sobrepostos.",
+    "media_dias_sobreposicao": "Média de dias de sobreposição nos casos identificados.",
+    "aberturas_coordenadas": "Quantidade de contas abertas em datas próximas, sugerindo ação coordenada.",
+
+    # === FINANCEIRO / RECEITA ===
+    "receita_total": "Soma das receitas brutas de todas as empresas dos grupos monitorados.",
+    "receita_maxima": "Maior receita bruta registrada entre as empresas do grupo nos últimos 12 meses.",
+    "periodo_maximo": "Período (mês/ano) em que foi registrada a maior receita.",
+    "primeiro_excesso_limite": "Data do primeiro período em que o grupo ultrapassou o limite de R$ 4,8M do Simples Nacional.",
+    "cnpjs_pgdas": "Quantidade de CNPJs com declarações PGDAS (empresas no Simples Nacional).",
+    "cnpjs_dime": "Quantidade de CNPJs com declarações DIME (empresas no regime normal de apuração).",
+    "total_creditos_icms": "Soma total dos créditos de ICMS declarados pelas empresas do grupo.",
+    "total_debitos_icms": "Soma total dos débitos de ICMS declarados pelas empresas do grupo.",
+    "debito_recolher": "Valor de ICMS a recolher (débitos menos créditos).",
+    "impacto_fiscal_estimado": "Estimativa do valor de tributos não recolhidos devido ao fracionamento irregular.",
+
+    # === ENERGIA ELÉTRICA (NF3e) ===
+    "grupos_com_energia": "Quantidade de grupos que possuem notas fiscais de energia elétrica (NF3e).",
+    "consumo_total_energia": "Soma dos valores de consumo de energia elétrica de todas as empresas dos grupos.",
+    "media_energia_grupo": "Valor médio de consumo de energia elétrica por grupo.",
+    "perc_energia_faturamento": "Percentual que o consumo de energia representa sobre o faturamento. Valores atípicos podem indicar inconsistências.",
+    "empresas_consumidoras_energia": "Quantidade de empresas com consumo de energia registrado.",
+    "qt_notas_energia": "Quantidade total de notas fiscais de energia elétrica emitidas.",
+
+    # === TELECOMUNICAÇÕES (NFCom) ===
+    "grupos_com_telecom": "Quantidade de grupos que possuem notas fiscais de telecomunicações (NFCom).",
+    "consumo_total_telecom": "Soma dos valores de consumo de telecomunicações de todas as empresas dos grupos.",
+    "media_telecom_grupo": "Valor médio de consumo de telecomunicações por grupo.",
+    "perc_telecom_faturamento": "Percentual que telecomunicações representa sobre o faturamento.",
+    "empresas_consumidoras_telecom": "Quantidade de empresas com consumo de telecom registrado.",
+    "qt_notas_telecom": "Quantidade total de notas fiscais de telecomunicações.",
+
+    # === INCONSISTÊNCIAS NFe ===
+    "documentos_analisados": "Quantidade de documentos fiscais eletrônicos (NFe) analisados para o grupo.",
+    "score_inconsistencias": "Score total de inconsistências encontradas nas NFe do grupo. Considera múltiplos indicadores de risco.",
+    "perc_cliente_incons": "Percentual de notas com inconsistência no cadastro do cliente/destinatário.",
+    "perc_email_incons": "Percentual de notas onde o mesmo e-mail aparece em diferentes destinatários.",
+    "perc_telefone_incons": "Percentual de notas com inconsistência nos telefones (mesmo telefone em diferentes partes).",
+    "perc_ip_incons": "Percentual de notas transmitidas do mesmo IP por diferentes emitentes, sugerindo controle centralizado.",
+    "perc_endereco_incons": "Percentual de notas com inconsistência nos endereços de emitente/destinatário.",
+    "notas_emitidas": "Quantidade de notas fiscais emitidas pelas empresas do grupo.",
+    "notas_recebidas": "Quantidade de notas fiscais recebidas pelas empresas do grupo.",
+
+    # === INDÍCIOS FISCAIS ===
+    "grupos_com_indicios": "Quantidade de grupos que possuem algum tipo de indício fiscal registrado.",
+    "total_indicios": "Soma total de indícios fiscais identificados em todos os grupos.",
+    "media_indicios_grupo": "Média de indícios por grupo econômico.",
+    "max_indicios_grupo": "Maior quantidade de indícios encontrada em um único grupo.",
+    "tipos_indicios_distintos": "Quantidade de tipos diferentes de indícios fiscais identificados.",
+    "perc_cnpjs_indicios": "Percentual de CNPJs do grupo que possuem pelo menos um indício.",
+    "indice_risco_indicios": "Índice de risco calculado com base na quantidade e gravidade dos indícios.",
+
+    # === VÍNCULOS SOCIETÁRIOS ===
+    "grupos_socios_compartilhados": "Quantidade de grupos que possuem ao menos um sócio em comum entre empresas.",
+    "perc_grupos_socios": "Percentual de grupos com sócios compartilhados em relação ao total.",
+    "media_socios_grupo": "Média de sócios compartilhados por grupo.",
+
+    # === ANÁLISE DE SIMILARIDADE ===
+    "score_similaridade": "Pontuação total de similaridade entre empresas do grupo. Soma dos pontos de cada critério atendido.",
+    "score_maximo_possivel": "Pontuação máxima possível se todas as empresas fossem 100% similares em todos os critérios.",
+    "percentual_similaridade": "Percentual de similaridade alcançado (score real / score máximo × 100).",
+    "total_evidencias": "Quantidade total de evidências de vínculo identificadas entre as empresas do grupo.",
+
+    # === DOSSIÊ DO GRUPO ===
+    "cnpjs_analisados": "Total de CNPJs incluídos na análise do dossiê do grupo.",
+    "com_cadastro": "CNPJs que possuem cadastro ativo na base de dados.",
+    "em_grupos_gei": "CNPJs que já fazem parte de algum grupo econômico identificado no GEI.",
+
+    # === MAPA ===
+    "total_empresas_mapa": "Quantidade total de empresas incluídas na visualização do mapa.",
+    "empresas_localizacao": "Empresas que possuem coordenadas geográficas válidas para exibição.",
+    "municipios_distintos": "Quantidade de municípios diferentes onde as empresas estão localizadas.",
+
+    # === ANÁLISES GERAIS ===
+    "total_cnpjs_monitorados": "Quantidade total de CNPJs sob monitoramento no sistema GEI.",
+    "grupos_risco_critico": "Grupos classificados com risco crítico que requerem ação prioritária.",
+    "perc_alto_risco": "Percentual de grupos classificados como alto risco em relação ao total monitorado.",
+}
+
+# =============================================================================
+# FUNÇÕES AUXILIARES DE UX - TOOLTIPS E CARDS INFORMATIVOS
+# =============================================================================
+
+def exibir_legenda_niveis():
+    """Exibe legenda visual dos níveis de risco"""
+    st.markdown("""
+    <div class="legenda-container">
+        <div class="legenda-item">
+            <div class="legenda-cor" style="background-color: #d32f2f;"></div>
+            <span><strong>CRÍTICO</strong> - Ação imediata</span>
+        </div>
+        <div class="legenda-item">
+            <div class="legenda-cor" style="background-color: #f57c00;"></div>
+            <span><strong>ALTO</strong> - Prioridade alta</span>
+        </div>
+        <div class="legenda-item">
+            <div class="legenda-cor" style="background-color: #fbc02d;"></div>
+            <span><strong>MÉDIO</strong> - Monitorar</span>
+        </div>
+        <div class="legenda-item">
+            <div class="legenda-cor" style="background-color: #388e3c;"></div>
+            <span><strong>BAIXO</strong> - Acompanhar</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def exibir_card_ajuda(titulo, conteudo, icone="ℹ️"):
+    """Exibe um card de ajuda contextual"""
+    st.markdown(f"""
+    <div class="help-section">
+        <div class="help-title">{icone} {titulo}</div>
+        <div class="help-content">{conteudo}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def exibir_info_modulo(modulo):
+    """Exibe informações de ajuda específicas para cada módulo"""
+    infos = {
+        "dashboard": """
+            <strong>Dashboard Executivo:</strong> Visão consolidada dos principais indicadores do sistema GEI.
+            <br><br>
+            <strong>Dica:</strong> Passe o mouse sobre o ícone (?) ao lado de cada KPI para ver uma explicação detalhada.
+            Os valores são atualizados automaticamente com base nos filtros aplicados na barra lateral.
+        """,
+        "ranking": """
+            <strong>Ranking de Grupos:</strong> Lista ordenada dos grupos econômicos por score de risco.
+            <br><br>
+            <strong>Score GEI:</strong> Calculado com base em múltiplos fatores (cadastro, sócios, financeiro, indícios).
+            <strong>Score ML:</strong> Calculado por algoritmos de Machine Learning.
+            Clique em um grupo para ver detalhes completos.
+        """,
+        "ml": """
+            <strong>Machine Learning:</strong> Utiliza 3 algoritmos para identificar grupos econômicos:
+            <br>• <strong>K-Means:</strong> Agrupa por similaridade de características
+            <br>• <strong>DBSCAN:</strong> Detecta clusters densos e outliers
+            <br>• <strong>Isolation Forest:</strong> Identifica anomalias
+            <br><br>
+            O <strong>modo consenso</strong> executa os 3 e mostra onde concordam, aumentando a confiança.
+        """,
+        "c115": """
+            <strong>Convênio 115:</strong> Monitora compartilhamento de créditos tributários em operações de energia e telecomunicações.
+            <br><br>
+            <strong>Índice de Risco:</strong> Calculado pela quantidade e percentual de CNPJs relacionados, total de compartilhamentos e padrões identificados.
+        """,
+        "ccs": """
+            <strong>CCS - Procuração Bancária:</strong> Analisa dados do Cadastro de Clientes do Sistema Financeiro.
+            <br><br>
+            <strong>Indicadores de alerta:</strong>
+            <br>• Contas bancárias compartilhadas entre CNPJs
+            <br>• Sobreposição de responsáveis (mesma pessoa gerenciando diferentes empresas simultaneamente)
+            <br>• Aberturas de contas em datas coordenadas
+        """,
+        "energia": """
+            <strong>Energia Elétrica (NF3e):</strong> Análise do consumo de energia das empresas do grupo.
+            <br><br>
+            <strong>Para que serve:</strong> Verificar compatibilidade entre consumo de energia e porte/atividade declarada.
+            Consumo muito baixo ou alto pode indicar inconsistências operacionais.
+        """,
+        "telecom": """
+            <strong>Telecomunicações (NFCom):</strong> Análise do consumo de serviços de telecom das empresas.
+            <br><br>
+            Empresas com alto faturamento mas baixo consumo de telecom podem indicar operações atípicas.
+        """,
+        "nfe": """
+            <strong>Inconsistências NFe:</strong> Análise de padrões suspeitos em notas fiscais eletrônicas.
+            <br><br>
+            <strong>Indicadores:</strong>
+            <br>• Mesmo e-mail/telefone em diferentes destinatários
+            <br>• Mesmo IP de transmissão para diferentes emitentes
+            <br>• Padrões de endereço inconsistentes
+        """,
+        "indicios": """
+            <strong>Indícios Fiscais:</strong> Registros de irregularidades ou alertas identificados no histórico das empresas.
+            <br><br>
+            Os indícios são categorizados por tipo e gravidade, contribuindo para o score de risco do grupo.
+        """,
+        "socios": """
+            <strong>Vínculos Societários:</strong> Mapeamento das conexões entre empresas através de sócios em comum.
+            <br><br>
+            <strong>Índice de Interconexão:</strong> Mede o grau de ligação societária (0 = sem conexão, 1 = totalmente conectado).
+        """,
+        "similaridade": """
+            <strong>Análise de Similaridade:</strong> Compara características das empresas para identificar padrões de grupo econômico.
+            <br><br>
+            <strong>Critérios analisados:</strong> Razão social, nome fantasia, CNAE, contador, endereço, sócios, consumo de utilidades.
+        """
+    }
+
+    if modulo in infos:
+        with st.expander("ℹ️ Como interpretar esta análise", expanded=False):
+            st.markdown(infos[modulo], unsafe_allow_html=True)
+
+def get_tooltip(chave, default=""):
+    """Retorna o tooltip para uma chave específica"""
+    return TOOLTIPS.get(chave, default)
 
 # =============================================================================
 # CONFIGURAÇÕES DE CONEXÃO
@@ -1018,13 +1375,13 @@ def analise_machine_learning(engine, dados, filtros):
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total de Grupos", len(df_grupos))
+        st.metric("Total de Grupos", len(df_grupos), help=TOOLTIPS["total_grupos"])
     with col2:
-        st.metric("Score Médio (GEI)", f"{df_grupos['score_final_ccs'].mean():.1f}")
+        st.metric("Score Médio (GEI)", f"{df_grupos['score_final_ccs'].mean():.1f}", help=TOOLTIPS["score_medio_gei"])
     with col3:
-        st.metric("Score Médio (ML)", f"{df_grupos['score_ml_percentual'].mean():.1f}%")
+        st.metric("Score Médio (ML)", f"{df_grupos['score_ml_percentual'].mean():.1f}%", help=TOOLTIPS["score_medio_ml"])
     with col4:
-        st.metric("Acima Limite SN", int(df_grupos['acima_limite_sn'].sum()))
+        st.metric("Acima Limite SN", int(df_grupos['acima_limite_sn'].sum()), help=TOOLTIPS["acima_limite_sn"])
     
     # Distribuição de scores
     col1, col2 = st.columns(2)
@@ -1310,26 +1667,26 @@ def analise_machine_learning(engine, dados, filtros):
         
         # Métricas de consenso
         col1, col2, col3, col4 = st.columns(4)
-        
+
         with col1:
             consenso_forte = len(df_grupos[df_grupos['votos_eh_grupo'] == 3])
-            st.metric("Consenso Forte (3/3)", consenso_forte, 
-                     help="3 algoritmos concordam")
-        
+            st.metric("Consenso Forte (3/3)", consenso_forte,
+                     help=TOOLTIPS["consenso_forte"])
+
         with col2:
             consenso_moderado = len(df_grupos[df_grupos['votos_eh_grupo'] == 2])
             st.metric("Consenso Moderado (2/3)", consenso_moderado,
-                     help="2 algoritmos concordam")
-        
+                     help=TOOLTIPS["consenso_moderado"])
+
         with col3:
             consenso_fraco = len(df_grupos[df_grupos['votos_eh_grupo'] == 1])
             st.metric("Consenso Fraco (1/3)", consenso_fraco,
-                     help="Apenas 1 algoritmo indica")
-        
+                     help=TOOLTIPS["consenso_fraco"])
+
         with col4:
             nao_grupo = len(df_grupos[df_grupos['votos_eh_grupo'] == 0])
             st.metric("Não é Grupo (0/3)", nao_grupo,
-                     help="Nenhum algoritmo indica")
+                     help=TOOLTIPS["nao_grupo"])
         
         # Gráfico de distribuição de votos
         st.subheader("Distribuição de Consenso")
@@ -1378,24 +1735,24 @@ def analise_machine_learning(engine, dados, filtros):
         st.subheader("Matriz de Concordância entre Algoritmos")
         
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
             concordancia_km_db = (df_grupos['kmeans_eh_grupo'] == df_grupos['dbscan_eh_grupo']).sum()
             perc_km_db = concordancia_km_db / len(df_grupos) * 100
             st.metric("K-Means ↔ DBSCAN", f"{perc_km_db:.1f}%",
-                     help=f"{concordancia_km_db} grupos com classificação idêntica")
-        
+                     help=f"{TOOLTIPS['concordancia_kmeans_dbscan']} ({concordancia_km_db} grupos concordantes)")
+
         with col2:
             concordancia_km_if = (df_grupos['kmeans_eh_grupo'] == df_grupos['iforest_eh_grupo']).sum()
             perc_km_if = concordancia_km_if / len(df_grupos) * 100
             st.metric("K-Means ↔ Isolation Forest", f"{perc_km_if:.1f}%",
-                     help=f"{concordancia_km_if} grupos com classificação idêntica")
-        
+                     help=f"{TOOLTIPS['concordancia_kmeans_iforest']} ({concordancia_km_if} grupos concordantes)")
+
         with col3:
             concordancia_db_if = (df_grupos['dbscan_eh_grupo'] == df_grupos['iforest_eh_grupo']).sum()
             perc_db_if = concordancia_db_if / len(df_grupos) * 100
             st.metric("DBSCAN ↔ Isolation Forest", f"{perc_db_if:.1f}%",
-                     help=f"{concordancia_db_if} grupos com classificação idêntica")
+                     help=f"{TOOLTIPS['concordancia_dbscan_iforest']} ({concordancia_db_if} grupos concordantes)")
         
         # ================================================================
         # SEÇÃO 5: ANÁLISE DETALHADA POR NÍVEL DE CONSENSO
@@ -1418,12 +1775,12 @@ def analise_machine_learning(engine, dados, filtros):
                 st.write("**Características destes grupos:**")
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Score ML Médio", f"{grupos_3votos['score_ml_percentual'].mean():.1f}%")
+                    st.metric("Score ML Médio", f"{grupos_3votos['score_ml_percentual'].mean():.1f}%", help=TOOLTIPS["score_medio_ml"])
                 with col2:
-                    st.metric("Score GEI Médio", f"{grupos_3votos['score_final_ccs'].mean():.1f}")
+                    st.metric("Score GEI Médio", f"{grupos_3votos['score_final_ccs'].mean():.1f}", help=TOOLTIPS["score_medio_gei"])
                 with col3:
                     acima_limite = (grupos_3votos['acima_limite_sn'] == 1).sum()
-                    st.metric("Acima Limite SN", f"{acima_limite} ({acima_limite/len(grupos_3votos)*100:.1f}%)")
+                    st.metric("Acima Limite SN", f"{acima_limite} ({acima_limite/len(grupos_3votos)*100:.1f}%)", help=TOOLTIPS["acima_limite_sn"])
                 
                 # Tabela top 50
                 colunas_exibir = [
@@ -5589,18 +5946,20 @@ def dashboard_executivo(dados, filtros):
     
     # Panorama Geral
     st.subheader("Panorama Geral")
+    exibir_info_modulo("dashboard")
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Total de Grupos", f"{len(df):,}")
+        st.metric("Total de Grupos", f"{len(df):,}", help=TOOLTIPS["total_grupos"])
     with col2:
-        st.metric("Total de CNPJs", f"{int(df['qntd_cnpj'].sum()):,}")
+        st.metric("Total de CNPJs", f"{int(df['qntd_cnpj'].sum()):,}", help=TOOLTIPS["total_cnpjs_monitorados"])
     with col3:
         score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
-        st.metric("Score Médio", f"{df[score_col].mean():.2f}")
+        st.metric("Score Médio", f"{df[score_col].mean():.2f}", help=TOOLTIPS["score_medio_gei"])
     with col4:
         score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
-        st.metric("Grupos Críticos", f"{len(df[df[score_col] >= 20]):,}")
+        st.metric("Grupos Críticos", f"{len(df[df[score_col] >= 20]):,}", help=TOOLTIPS["grupos_criticos"])
     
     # Análises gráficas
     st.subheader("Análises")
@@ -5715,13 +6074,13 @@ def dashboard_executivo(dados, filtros):
         impacto_fiscal_estimado = soma_faturamento_simples * DIFERENCA_ALIQUOTA
 
         with col1:
-            st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}")
+            st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}", help="Quantidade de grupos econômicos que atendem aos critérios de score e receita definidos nos filtros acima.")
         with col2:
-            st.metric("CNPJs no Simples", f"{qtd_cnpjs_simples:,}")
+            st.metric("CNPJs no Simples", f"{qtd_cnpjs_simples:,}", help="Total de CNPJs enquadrados no Simples Nacional dentro dos grupos de alto risco identificados.")
         with col3:
-            st.metric("Faturamento Simples", formatar_moeda(soma_faturamento_simples))
+            st.metric("Faturamento Simples", formatar_moeda(soma_faturamento_simples), help="Soma do faturamento das empresas no Simples Nacional dos grupos de alto risco.")
         with col4:
-            st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado), delta="potencial não arrecadado")
+            st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado), delta="potencial não arrecadado", help=TOOLTIPS["impacto_fiscal_estimado"])
 
         st.divider()
 
@@ -6059,14 +6418,14 @@ def renderizar_detalhe_contador(engine, nm_contador, nm_gerfe, filtros):
     # Métricas gerais
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total de Grupos", len(df_grupos['num_grupo'].unique()))
+        st.metric("Total de Grupos", len(df_grupos['num_grupo'].unique()), help=TOOLTIPS["total_grupos_contador"])
     with col2:
-        st.metric("Score Médio CCS", f"{df_grupos['score_final_ccs'].mean():.2f}")
+        st.metric("Score Médio CCS", f"{df_grupos['score_final_ccs'].mean():.2f}", help=TOOLTIPS["score_medio_gei"])
     with col3:
-        st.metric("Total de CNPJs", int(df_grupos['qntd_cnpj'].sum()))
+        st.metric("Total de CNPJs", int(df_grupos['qntd_cnpj'].sum()), help=TOOLTIPS["qtd_cnpjs"])
     with col4:
         alto_risco = len(df_grupos[df_grupos['nivel_risco_ccs'].isin(['CRÍTICO', 'ALTO'])])
-        st.metric("Grupos Alto Risco", alto_risco)
+        st.metric("Grupos Alto Risco", alto_risco, help="Quantidade de grupos classificados com risco CRÍTICO ou ALTO no CCS.")
     
     # Distribuição de níveis de risco
     st.subheader("📈 Distribuição de Níveis de Risco")
@@ -6233,15 +6592,15 @@ def menu_contadores(engine, dados, filtros):
     # Panorama Geral
     st.subheader("Panorama Geral")
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Total Contadores", len(df_cont))
+        st.metric("Total Contadores", len(df_cont), help=TOOLTIPS["total_contadores"])
     with col2:
-        st.metric("Média Score", f"{df_cont['media'].mean():.2f}")
+        st.metric("Média Score", f"{df_cont['media'].mean():.2f}", help=TOOLTIPS["media_score_contador"])
     with col3:
-        st.metric("Total Grupos", int(df_cont['qntd_grupos'].sum()))
+        st.metric("Total Grupos", int(df_cont['qntd_grupos'].sum()), help=TOOLTIPS["total_grupos_contador"])
     with col4:
-        st.metric("GERFEs Distintas", df_cont['nm_gerfe'].nunique())
+        st.metric("GERFEs Distintas", df_cont['nm_gerfe'].nunique(), help=TOOLTIPS["gerfes_distintas"])
     
     # Top Contadores por Risco
     st.subheader("Top 20 Contadores por Score Médio")
@@ -6327,18 +6686,18 @@ def menu_pagamentos(engine, dados, filtros):
     # Panorama Geral
     st.subheader("Panorama Geral")
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Grupos com Dados", len(df_pag))
+        st.metric("Grupos com Dados", len(df_pag), help=TOOLTIPS["grupos_com_pagamentos"])
     with col2:
         total_empresas = df_pag['valor_meios_pagamento_empresas'].sum()
-        st.metric("Total Empresas", formatar_moeda(total_empresas))
+        st.metric("Total Empresas", formatar_moeda(total_empresas), help=TOOLTIPS["total_pagamentos_empresas"])
     with col3:
         total_socios = df_pag['valor_meios_pagamento_socios'].sum()
-        st.metric("Total Sócios", formatar_moeda(total_socios))
+        st.metric("Total Sócios", formatar_moeda(total_socios), help=TOOLTIPS["total_pagamentos_socios"])
     with col4:
         media_risco = df_pag['indice_risco_pagamentos'].mean()
-        st.metric("Índice Risco Médio", f"{media_risco:.3f}")
+        st.metric("Índice Risco Médio", f"{media_risco:.3f}", help=TOOLTIPS["indice_risco_pagamentos"])
     
     # Gráficos
     col1, col2 = st.columns(2)
@@ -6427,18 +6786,18 @@ def menu_funcionarios(engine, dados, filtros):
     # Panorama Geral
     st.subheader("Panorama Geral")
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Grupos com Dados", len(df_func))
+        st.metric("Grupos com Dados", len(df_func), help="Quantidade de grupos econômicos que possuem dados de funcionários registrados.")
     with col2:
-        st.metric("Total Funcionários", f"{int(df_func['total_funcionarios'].sum()):,}")
+        st.metric("Total Funcionários", f"{int(df_func['total_funcionarios'].sum()):,}", help=TOOLTIPS["total_funcionarios"])
     with col3:
         media_func = df_func['total_funcionarios'].mean()
-        st.metric("Média Funcionários/Grupo", f"{media_func:.1f}")
+        st.metric("Média Funcionários/Grupo", f"{media_func:.1f}", help=TOOLTIPS["media_funcionarios_grupo"])
     with col4:
         if 'indice_risco_fat_func' in df_func.columns:
             media_risco = df_func['indice_risco_fat_func'].mean()
-            st.metric("Índice Risco Médio", f"{media_risco:.3f}")
+            st.metric("Índice Risco Médio", f"{media_risco:.3f}", help=TOOLTIPS["indice_risco_fat_func"])
     
     # Gráficos
     col1, col2 = st.columns(2)
@@ -6533,19 +6892,21 @@ def menu_c115(engine, dados, filtros):
     
     # Panorama Geral
     st.subheader("Panorama Geral")
+    exibir_info_modulo("c115")
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Grupos Monitorados", len(df_c115))
+        st.metric("Grupos Monitorados", len(df_c115), help=TOOLTIPS["grupos_monitorados_c115"])
     with col2:
         criticos = len(df_c115[df_c115['nivel_risco_grupo_economico'] == 'CRÍTICO'])
-        st.metric("Grupos Críticos", criticos)
+        st.metric("Grupos Críticos", criticos, help=TOOLTIPS["grupos_criticos_c115"])
     with col3:
         media_indice = df_c115['indice_risco_grupo_economico'].mean()
-        st.metric("Índice Risco Médio", f"{media_indice:.2f}")
+        st.metric("Índice Risco Médio", f"{media_indice:.2f}", help=TOOLTIPS["indice_risco_c115"])
     with col4:
         total_tomadores = df_c115['total_tomadores'].sum()
-        st.metric("Total Tomadores", f"{int(total_tomadores):,}")
+        st.metric("Total Tomadores", f"{int(total_tomadores):,}", help=TOOLTIPS["total_tomadores_c115"])
     
     # Distribuição por Nível de Risco
     st.subheader("Distribuição por Nível de Risco")
@@ -6583,16 +6944,16 @@ def menu_c115(engine, dados, filtros):
     
     if grupo_selecionado:
         info = df_c115[df_c115['num_grupo'] == grupo_selecionado].iloc[0]
-        
+
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Ranking", int(info['ranking_risco']))
+            st.metric("Ranking", int(info['ranking_risco']), help=TOOLTIPS["ranking_risco_c115"])
         with col2:
-            st.metric("Nível Risco", info['nivel_risco_grupo_economico'])
+            st.metric("Nível Risco", info['nivel_risco_grupo_economico'], help=TOOLTIPS["nivel_risco_c115"])
         with col3:
-            st.metric("Índice Risco", f"{info['indice_risco_grupo_economico']:.2f}")
+            st.metric("Índice Risco", f"{info['indice_risco_grupo_economico']:.2f}", help=TOOLTIPS["indice_risco_c115"])
         with col4:
-            st.metric("CNPJs Relacionados", int(info['qtd_cnpjs_relacionados']))
+            st.metric("CNPJs Relacionados", int(info['qtd_cnpjs_relacionados']), help=TOOLTIPS["cnpjs_relacionados_c115"])
 
 def menu_ccs(engine, dados, filtros):
     """Análise de Procuração Bancária (CCS)"""
@@ -6620,19 +6981,21 @@ def menu_ccs(engine, dados, filtros):
     
     # Panorama Geral
     st.subheader("Panorama Geral")
+    exibir_info_modulo("ccs")
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("Grupos com Dados CCS", len(df_ccs))
+        st.metric("Grupos com Dados CCS", len(df_ccs), help=TOOLTIPS["grupos_dados_ccs"])
     with col2:
         grupos_compartilhamento = len(df_ccs[df_ccs['qtd_contas_compartilhadas'] > 0])
-        st.metric("Grupos com Compartilhamento", grupos_compartilhamento)
+        st.metric("Grupos com Compartilhamento", grupos_compartilhamento, help=TOOLTIPS["grupos_compartilhamento_ccs"])
     with col3:
         total_compartilhadas = df_ccs['qtd_contas_compartilhadas'].sum()
-        st.metric("Total Contas Compartilhadas", int(total_compartilhadas))
+        st.metric("Total Contas Compartilhadas", int(total_compartilhadas), help=TOOLTIPS["contas_compartilhadas"])
     with col4:
         media_indice = df_ccs['indice_risco_ccs'].mean()
-        st.metric("Índice Risco CCS Médio", f"{media_indice:.4f}")
+        st.metric("Índice Risco CCS Médio", f"{media_indice:.4f}", help=TOOLTIPS["indice_risco_ccs"])
     
     # Gráficos
     st.subheader("Análises Visuais")
@@ -6995,26 +7358,27 @@ def menu_energia(engine, dados, filtros):
 
     with tab1:
         st.subheader("Panorama do Consumo de Energia Elétrica")
+        exibir_info_modulo("energia")
 
         if tem_nf3e:
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
                 grupos_com_energia = len(df[df['nf3e_vl_total'] > 0])
-                st.metric("Grupos com Consumo", f"{grupos_com_energia:,}")
+                st.metric("Grupos com Consumo", f"{grupos_com_energia:,}", help=TOOLTIPS["grupos_com_energia"])
 
             with col2:
                 total_energia = df['nf3e_vl_total'].sum()
-                st.metric("Consumo Total", formatar_moeda(total_energia))
+                st.metric("Consumo Total", formatar_moeda(total_energia), help=TOOLTIPS["consumo_total_energia"])
 
             with col3:
                 media_energia = df[df['nf3e_vl_total'] > 0]['nf3e_vl_total'].mean()
-                st.metric("Média por Grupo", formatar_moeda(media_energia) if pd.notna(media_energia) else "R$ 0,00")
+                st.metric("Média por Grupo", formatar_moeda(media_energia) if pd.notna(media_energia) else "R$ 0,00", help=TOOLTIPS["media_energia_grupo"])
 
             with col4:
                 if 'nf3e_perc_energia_faturamento' in df.columns:
                     media_perc = df[df['nf3e_perc_energia_faturamento'] > 0]['nf3e_perc_energia_faturamento'].mean()
-                    st.metric("% Médio s/ Faturamento", f"{media_perc:.2f}%" if pd.notna(media_perc) else "N/A")
+                    st.metric("% Médio s/ Faturamento", f"{media_perc:.2f}%" if pd.notna(media_perc) else "N/A", help=TOOLTIPS["perc_energia_faturamento"])
 
             st.divider()
 
@@ -7208,26 +7572,27 @@ def menu_telecom(engine, dados, filtros):
 
     with tab1:
         st.subheader("Panorama do Consumo de Telecomunicações")
+        exibir_info_modulo("telecom")
 
         if tem_nfcom:
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
                 grupos_com_telecom = len(df[df['nfcom_vl_total'] > 0])
-                st.metric("Grupos com Consumo", f"{grupos_com_telecom:,}")
+                st.metric("Grupos com Consumo", f"{grupos_com_telecom:,}", help=TOOLTIPS["grupos_com_telecom"])
 
             with col2:
                 total_telecom = df['nfcom_vl_total'].sum()
-                st.metric("Consumo Total", formatar_moeda(total_telecom))
+                st.metric("Consumo Total", formatar_moeda(total_telecom), help=TOOLTIPS["consumo_total_telecom"])
 
             with col3:
                 media_telecom = df[df['nfcom_vl_total'] > 0]['nfcom_vl_total'].mean()
-                st.metric("Média por Grupo", formatar_moeda(media_telecom) if pd.notna(media_telecom) else "R$ 0,00")
+                st.metric("Média por Grupo", formatar_moeda(media_telecom) if pd.notna(media_telecom) else "R$ 0,00", help=TOOLTIPS["media_telecom_grupo"])
 
             with col4:
                 if 'nfcom_perc_telecom_faturamento' in df.columns:
                     media_perc = df[df['nfcom_perc_telecom_faturamento'] > 0]['nfcom_perc_telecom_faturamento'].mean()
-                    st.metric("% Médio s/ Faturamento", f"{media_perc:.2f}%" if pd.notna(media_perc) else "N/A")
+                    st.metric("% Médio s/ Faturamento", f"{media_perc:.2f}%" if pd.notna(media_perc) else "N/A", help=TOOLTIPS["perc_telecom_faturamento"])
 
             st.divider()
 
@@ -7696,23 +8061,23 @@ def inconsistencias_nfe(engine, dados, filtros):
 def indicios_fiscais(dados, filtros):
     """Análise de indícios fiscais"""
     st.markdown("<h1 class='main-header'>Indícios Fiscais</h1>", unsafe_allow_html=True)
-    st.info("Indícios fiscais identificados no sistema por grupo econômico.")
-    
+    exibir_info_modulo("indicios")
+
     # Análise geral
     df = dados['percent']
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         grupos_com = len(df[df['qtd_total_indicios'] > 0])
-        st.metric("Grupos com Indícios", grupos_com)
+        st.metric("Grupos com Indícios", grupos_com, help=TOOLTIPS["grupos_com_indicios"])
     with col2:
         total = df['qtd_total_indicios'].sum()
-        st.metric("Total de Indícios", f"{int(total):,}")
+        st.metric("Total de Indícios", f"{int(total):,}", help=TOOLTIPS["total_indicios"])
     with col3:
         media = df['qtd_total_indicios'].mean()
-        st.metric("Média por Grupo", f"{media:.1f}")
+        st.metric("Média por Grupo", f"{media:.1f}", help=TOOLTIPS["media_indicios_grupo"])
     with col4:
         maximo = df['qtd_total_indicios'].max()
-        st.metric("Máximo em um Grupo", int(maximo))
+        st.metric("Máximo em um Grupo", int(maximo), help=TOOLTIPS["max_indicios_grupo"])
     
     # Top grupos
     st.subheader("Top 30 Grupos com Mais Indícios")
@@ -7745,18 +8110,18 @@ def indicios_fiscais(dados, filtros):
             with col1:
                 st.metric("Grupo", grupo_selecionado)
             with col2:
-                st.metric("Total Indícios", int(info_grupo['qtd_total_indicios']))
+                st.metric("Total Indícios", int(info_grupo['qtd_total_indicios']), help=TOOLTIPS["total_indicios"])
             with col3:
-                st.metric("Tipos Distintos", int(info_grupo['qtd_tipos_indicios_distintos']))
+                st.metric("Tipos Distintos", int(info_grupo['qtd_tipos_indicios_distintos']), help=TOOLTIPS["tipos_indicios_distintos"])
             with col4:
-                st.metric("CNPJs", int(info_grupo['qntd_cnpj']))
+                st.metric("CNPJs", int(info_grupo['qntd_cnpj']), help=TOOLTIPS["qtd_cnpjs"])
 
             col1, col2 = st.columns(2)
             with col1:
                 perc = info_grupo.get('perc_cnpjs_com_indicios', 0)
-                st.metric("% CNPJs com Indícios", f"{perc:.1f}%" if pd.notna(perc) else "N/A")
+                st.metric("% CNPJs com Indícios", f"{perc:.1f}%" if pd.notna(perc) else "N/A", help=TOOLTIPS["perc_cnpjs_indicios"])
             with col2:
-                st.metric("Score Final", f"{info_grupo[score_col]:.2f}")
+                st.metric("Score Final", f"{info_grupo[score_col]:.2f}", help=TOOLTIPS["score_medio_gei"])
 
             # Mostrar detalhes dos indícios se disponível
             if 'indicios' in dados and not dados['indicios'].empty:
@@ -7768,42 +8133,43 @@ def indicios_fiscais(dados, filtros):
 def vinculos_societarios(dados, filtros):
     """Análise de vínculos societários"""
     st.markdown("<h1 class='main-header'>Vínculos Societários</h1>", unsafe_allow_html=True)
-    
+    exibir_info_modulo("socios")
+
     df = aplicar_filtros(dados['percent'], filtros)
-    
+
     if df.empty:
         st.warning("Nenhum dado encontrado.")
         return
-    
+
     st.subheader("Métricas")
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         grupos = len(df[df['qtd_socios_compartilhados'] > 0])
         perc = (grupos / len(df) * 100) if len(df) > 0 else 0
-        st.metric("Grupos c/ Sócios Compartilhados", f"{grupos:,}", f"{perc:.1f}%")
-    
+        st.metric("Grupos c/ Sócios Compartilhados", f"{grupos:,}", f"{perc:.1f}%", help=TOOLTIPS["grupos_socios_compartilhados"])
+
     with col2:
         media = df['qtd_socios_compartilhados'].mean()
-        st.metric("Média de Sócios", f"{media:.1f}")
-    
+        st.metric("Média de Sócios", f"{media:.1f}", help=TOOLTIPS["media_socios_grupo"])
+
     with col3:
         if 'indice_interconexao' in df.columns:
-            st.metric("Índice Médio", f"{df['indice_interconexao'].mean():.3f}")
-    
+            st.metric("Índice Médio", f"{df['indice_interconexao'].mean():.3f}", help=TOOLTIPS["indice_interconexao"])
+
     grupo = st.selectbox("Selecione um grupo:", df['num_grupo'].tolist())
-    
+
     if grupo:
         info = df[df['num_grupo'] == grupo].iloc[0]
-        
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("CNPJs", f"{int(info['qntd_cnpj'])}")
+            st.metric("CNPJs", f"{int(info['qntd_cnpj'])}", help=TOOLTIPS["qtd_cnpjs"])
         with col2:
-            st.metric("Sócios Compartilhados", f"{int(info['qtd_socios_compartilhados'])}")
+            st.metric("Sócios Compartilhados", f"{int(info['qtd_socios_compartilhados'])}", help=TOOLTIPS["socios_compartilhados"])
         with col3:
             if 'indice_interconexao' in info:
-                st.metric("Índice", f"{info['indice_interconexao']:.3f}")
+                st.metric("Índice", f"{info['indice_interconexao']:.3f}", help=TOOLTIPS["indice_interconexao"])
         
         df_socios = dados['socios_compartilhados'][
             dados['socios_compartilhados']['num_grupo'] == grupo
