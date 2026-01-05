@@ -5934,106 +5934,440 @@ def analise_pontual(engine, dados, filtros):
         st.write("• Conclusões e recomendações")
 
 def dashboard_executivo(dados, filtros):
-    """Dashboard executivo principal"""
-    st.markdown("<h1 class='main-header'>Dashboard Executivo</h1>", unsafe_allow_html=True)
-    
+    """Dashboard executivo principal com visão de todas as dimensões"""
+    st.markdown("<h1 class='main-header'>📊 Dashboard Executivo</h1>", unsafe_allow_html=True)
+
     df = aplicar_filtros(dados['percent'], filtros)
-    
+
     if df.empty:
         st.warning("Nenhum dado encontrado.")
         return
-    
-    # Panorama Geral
-    st.subheader("Panorama Geral")
+
+    score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
+
+    # =========================================================================
+    # PANORAMA GERAL - KPIs PRINCIPAIS
+    # =========================================================================
+    st.subheader("🎯 Panorama Geral")
     exibir_info_modulo("dashboard")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.metric("Total de Grupos", f"{len(df):,}", help=TOOLTIPS["total_grupos"])
     with col2:
         st.metric("Total de CNPJs", f"{int(df['qntd_cnpj'].sum()):,}", help=TOOLTIPS["total_cnpjs_monitorados"])
     with col3:
-        score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
         st.metric("Score Médio", f"{df[score_col].mean():.2f}", help=TOOLTIPS["score_medio_gei"])
     with col4:
-        score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
-        st.metric("Grupos Críticos", f"{len(df[df[score_col] >= 20]):,}", help=TOOLTIPS["grupos_criticos"])
-    
-    # Análises gráficas
-    st.subheader("Análises")
+        grupos_criticos = len(df[df[score_col] >= 20])
+        st.metric("Grupos Críticos", f"{grupos_criticos:,}", help=TOOLTIPS["grupos_criticos"])
+    with col5:
+        if 'valor_max' in df.columns:
+            acima_limite = len(df[df['valor_max'] > 4800000])
+            st.metric("Acima Limite SN", f"{acima_limite:,}", help=TOOLTIPS["acima_limite_sn"])
+
+    # =========================================================================
+    # VISÃO GERAL - GRÁFICOS PRINCIPAIS
+    # =========================================================================
+    st.divider()
+    st.subheader("📈 Visão Geral")
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
-        score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
-        fig = px.histogram(df, x=score_col, nbins=20, 
-                          title="Distribuição de Scores", template=filtros['tema'])
-        fig.update_layout(height=300)
-        st.plotly_chart(fig)
-    
+        fig = px.histogram(df, x=score_col, nbins=20,
+                          title="Distribuição de Scores",
+                          template=filtros['tema'],
+                          color_discrete_sequence=['#1565C0'])
+        fig.update_layout(height=280, margin=dict(t=40, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+
     with col2:
-        if 'nivel_risco_grupo_economico' in df.columns:
-            dist = df['nivel_risco_grupo_economico'].value_counts()
-            fig = px.pie(values=dist.values, names=dist.index, 
-                        title="Distribuição C115", template=filtros['tema'])
-            fig.update_layout(height=300)
-            st.plotly_chart(fig)
-    
+        if 'nivel_risco_ccs' in df.columns:
+            dist = df['nivel_risco_ccs'].value_counts()
+            cores = {'CRÍTICO': '#d32f2f', 'ALTO': '#f57c00', 'MÉDIO': '#fbc02d', 'BAIXO': '#388e3c'}
+            fig = px.pie(values=dist.values, names=dist.index,
+                        title="Distribuição por Nível de Risco",
+                        template=filtros['tema'],
+                        color=dist.index,
+                        color_discrete_map=cores)
+            fig.update_layout(height=280, margin=dict(t=40, b=20))
+            st.plotly_chart(fig, use_container_width=True)
+
     with col3:
         if not dados['contador'].empty:
             top = dados['contador'].head(10).sort_values('media', ascending=True)
             fig = px.bar(top, x='media', y='nm_contador', orientation='h',
-                         title="Top 10 Contadores", template=filtros['tema'])
-            fig.update_layout(height=300)
-            st.plotly_chart(fig)
-    
-    # Top grupos críticos
-    st.subheader("Top 15 Grupos Críticos")
-    score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
+                         title="Top 10 Contadores por Risco",
+                         template=filtros['tema'],
+                         color='media',
+                         color_continuous_scale='Reds')
+            fig.update_layout(height=280, margin=dict(t=40, b=20), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    # =========================================================================
+    # DIMENSÕES DE ANÁLISE - TABS
+    # =========================================================================
+    st.divider()
+    st.subheader("📂 Dimensões de Análise")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "💰 Financeiro & Pagamentos",
+        "👷 Funcionários & Societário",
+        "📋 C115 & CCS",
+        "⚡ Energia & Telecom",
+        "⚠️ Indícios & NFe"
+    ])
+
+    # ----- TAB 1: FINANCEIRO & PAGAMENTOS -----
+    with tab1:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### 💰 Financeiro (PGDAS/DIME)")
+            col_a, col_b, col_c = st.columns(3)
+
+            if 'valor_max' in df.columns:
+                with col_a:
+                    receita_total = df['valor_max'].sum()
+                    st.metric("Receita Total", formatar_moeda(receita_total), help=TOOLTIPS["receita_total"])
+                with col_b:
+                    media_receita = df['valor_max'].mean()
+                    st.metric("Média por Grupo", formatar_moeda(media_receita))
+                with col_c:
+                    acima = len(df[df['valor_max'] > 4800000])
+                    st.metric("Acima R$ 4,8M", f"{acima:,}")
+
+                # Gráfico de faixas de receita
+                df_temp = df.copy()
+                df_temp['faixa_receita'] = pd.cut(df_temp['valor_max'],
+                    bins=[0, 1e6, 2.4e6, 4.8e6, 10e6, float('inf')],
+                    labels=['< 1M', '1M-2,4M', '2,4M-4,8M', '4,8M-10M', '> 10M'])
+                dist_receita = df_temp['faixa_receita'].value_counts().sort_index()
+                fig = px.bar(x=dist_receita.index.astype(str), y=dist_receita.values,
+                            title="Grupos por Faixa de Receita",
+                            template=filtros['tema'],
+                            color=dist_receita.values,
+                            color_continuous_scale='Blues')
+                fig.update_layout(height=250, showlegend=False, margin=dict(t=40, b=20))
+                st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.markdown("##### 💳 Meios de Pagamento (DIMP)")
+            if 'indice_risco_pagamentos' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                with col_a:
+                    grupos_pag = len(df[df['indice_risco_pagamentos'] > 0])
+                    st.metric("Grupos c/ Dados", f"{grupos_pag:,}", help=TOOLTIPS["grupos_com_pagamentos"])
+                with col_b:
+                    media_risco = df['indice_risco_pagamentos'].mean()
+                    st.metric("Índice Médio", f"{media_risco:.3f}", help=TOOLTIPS["indice_risco_pagamentos"])
+                with col_c:
+                    alto_risco_pag = len(df[df['indice_risco_pagamentos'] > 0.5])
+                    st.metric("Alto Risco", f"{alto_risco_pag:,}")
+
+                # Gráfico de distribuição
+                fig = px.histogram(df[df['indice_risco_pagamentos'] > 0],
+                                  x='indice_risco_pagamentos', nbins=20,
+                                  title="Distribuição Índice Risco Pagamentos",
+                                  template=filtros['tema'],
+                                  color_discrete_sequence=['#8e24aa'])
+                fig.update_layout(height=250, margin=dict(t=40, b=20))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de meios de pagamento não disponíveis.")
+
+    # ----- TAB 2: FUNCIONÁRIOS & SOCIETÁRIO -----
+    with tab2:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### 👷 Funcionários (RAIS/CAGED)")
+            if 'total_funcionarios' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                with col_a:
+                    total_func = int(df['total_funcionarios'].sum())
+                    st.metric("Total Funcionários", f"{total_func:,}", help=TOOLTIPS["total_funcionarios"])
+                with col_b:
+                    media_func = df['total_funcionarios'].mean()
+                    st.metric("Média/Grupo", f"{media_func:.1f}", help=TOOLTIPS["media_funcionarios_grupo"])
+                with col_c:
+                    if 'indice_risco_fat_func' in df.columns:
+                        media_risco_func = df['indice_risco_fat_func'].mean()
+                        st.metric("Índice Risco", f"{media_risco_func:.3f}", help=TOOLTIPS["indice_risco_fat_func"])
+
+                # Scatter faturamento vs funcionários
+                df_scatter = df[(df['total_funcionarios'] > 0) & (df['valor_max'] > 0)].head(200)
+                if not df_scatter.empty:
+                    fig = px.scatter(df_scatter, x='total_funcionarios', y='valor_max',
+                                    title="Receita vs Funcionários",
+                                    template=filtros['tema'],
+                                    color=score_col,
+                                    color_continuous_scale='RdYlGn_r',
+                                    hover_data=['num_grupo'])
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de funcionários não disponíveis.")
+
+        with col2:
+            st.markdown("##### 🤝 Vínculos Societários (JUCESC)")
+            if 'qtd_socios_compartilhados' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                grupos_socios = len(df[df['qtd_socios_compartilhados'] > 0])
+                with col_a:
+                    st.metric("Grupos c/ Sócios", f"{grupos_socios:,}", help=TOOLTIPS["grupos_socios_compartilhados"])
+                with col_b:
+                    media_socios = df['qtd_socios_compartilhados'].mean()
+                    st.metric("Média Sócios", f"{media_socios:.1f}", help=TOOLTIPS["media_socios_grupo"])
+                with col_c:
+                    if 'indice_interconexao' in df.columns:
+                        media_inter = df['indice_interconexao'].mean()
+                        st.metric("Índice Interconexão", f"{media_inter:.3f}", help=TOOLTIPS["indice_interconexao"])
+
+                # Gráfico de distribuição
+                fig = px.histogram(df[df['qtd_socios_compartilhados'] > 0],
+                                  x='qtd_socios_compartilhados', nbins=15,
+                                  title="Distribuição Sócios Compartilhados",
+                                  template=filtros['tema'],
+                                  color_discrete_sequence=['#00897b'])
+                fig.update_layout(height=250, margin=dict(t=40, b=20))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de vínculos societários não disponíveis.")
+
+    # ----- TAB 3: C115 & CCS -----
+    with tab3:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### 📋 Convênio 115")
+            if 'indice_risco_grupo_economico' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                with col_a:
+                    grupos_c115 = len(df[df['indice_risco_grupo_economico'] > 0])
+                    st.metric("Grupos Monitorados", f"{grupos_c115:,}", help=TOOLTIPS["grupos_monitorados_c115"])
+                with col_b:
+                    media_c115 = df['indice_risco_grupo_economico'].mean()
+                    st.metric("Índice Médio", f"{media_c115:.2f}", help=TOOLTIPS["indice_risco_c115"])
+                with col_c:
+                    if 'nivel_risco_grupo_economico' in df.columns:
+                        criticos_c115 = len(df[df['nivel_risco_grupo_economico'] == 'CRÍTICO'])
+                        st.metric("Críticos", f"{criticos_c115:,}", help=TOOLTIPS["grupos_criticos_c115"])
+
+                # Gráfico por nível de risco
+                if 'nivel_risco_grupo_economico' in df.columns:
+                    dist_c115 = df['nivel_risco_grupo_economico'].value_counts()
+                    cores = {'CRÍTICO': '#d32f2f', 'ALTO': '#f57c00', 'MÉDIO': '#fbc02d', 'BAIXO': '#388e3c'}
+                    fig = px.pie(values=dist_c115.values, names=dist_c115.index,
+                                title="Distribuição Risco C115",
+                                template=filtros['tema'],
+                                color=dist_c115.index,
+                                color_discrete_map=cores)
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados do Convênio 115 não disponíveis.")
+
+        with col2:
+            st.markdown("##### 🏦 Procuração Bancária (CCS)")
+            if 'indice_risco_ccs' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                with col_a:
+                    grupos_ccs = len(df[df['indice_risco_ccs'] > 0])
+                    st.metric("Grupos c/ Dados", f"{grupos_ccs:,}", help=TOOLTIPS["grupos_dados_ccs"])
+                with col_b:
+                    media_ccs = df['indice_risco_ccs'].mean()
+                    st.metric("Índice Médio", f"{media_ccs:.4f}", help=TOOLTIPS["indice_risco_ccs"])
+                with col_c:
+                    if 'nivel_risco_ccs' in df.columns:
+                        criticos_ccs = len(df[df['nivel_risco_ccs'] == 'CRÍTICO'])
+                        st.metric("Críticos", f"{criticos_ccs:,}")
+
+                # Gráfico por nível de risco CCS
+                if 'nivel_risco_ccs' in df.columns:
+                    dist_ccs = df['nivel_risco_ccs'].value_counts()
+                    cores = {'CRÍTICO': '#d32f2f', 'ALTO': '#f57c00', 'MÉDIO': '#fbc02d', 'BAIXO': '#388e3c'}
+                    fig = px.pie(values=dist_ccs.values, names=dist_ccs.index,
+                                title="Distribuição Risco CCS",
+                                template=filtros['tema'],
+                                color=dist_ccs.index,
+                                color_discrete_map=cores)
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados CCS não disponíveis.")
+
+    # ----- TAB 4: ENERGIA & TELECOM -----
+    with tab4:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### ⚡ Energia Elétrica (NF3e)")
+            if 'nf3e_vl_total' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                grupos_energia = len(df[df['nf3e_vl_total'] > 0])
+                with col_a:
+                    st.metric("Grupos c/ Consumo", f"{grupos_energia:,}", help=TOOLTIPS["grupos_com_energia"])
+                with col_b:
+                    total_energia = df['nf3e_vl_total'].sum()
+                    st.metric("Consumo Total", formatar_moeda(total_energia), help=TOOLTIPS["consumo_total_energia"])
+                with col_c:
+                    media_energia = df[df['nf3e_vl_total'] > 0]['nf3e_vl_total'].mean()
+                    st.metric("Média/Grupo", formatar_moeda(media_energia) if pd.notna(media_energia) else "R$ 0")
+
+                # Gráfico de distribuição
+                df_energia = df[df['nf3e_vl_total'] > 0]
+                if not df_energia.empty:
+                    fig = px.histogram(df_energia, x='nf3e_vl_total', nbins=20,
+                                      title="Distribuição Consumo Energia",
+                                      template=filtros['tema'],
+                                      color_discrete_sequence=['#ffc107'])
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de energia elétrica não disponíveis.")
+
+        with col2:
+            st.markdown("##### 📱 Telecomunicações (NFCom)")
+            if 'nfcom_vl_total' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                grupos_telecom = len(df[df['nfcom_vl_total'] > 0])
+                with col_a:
+                    st.metric("Grupos c/ Consumo", f"{grupos_telecom:,}", help=TOOLTIPS["grupos_com_telecom"])
+                with col_b:
+                    total_telecom = df['nfcom_vl_total'].sum()
+                    st.metric("Consumo Total", formatar_moeda(total_telecom), help=TOOLTIPS["consumo_total_telecom"])
+                with col_c:
+                    media_telecom = df[df['nfcom_vl_total'] > 0]['nfcom_vl_total'].mean()
+                    st.metric("Média/Grupo", formatar_moeda(media_telecom) if pd.notna(media_telecom) else "R$ 0")
+
+                # Gráfico de distribuição
+                df_telecom = df[df['nfcom_vl_total'] > 0]
+                if not df_telecom.empty:
+                    fig = px.histogram(df_telecom, x='nfcom_vl_total', nbins=20,
+                                      title="Distribuição Consumo Telecom",
+                                      template=filtros['tema'],
+                                      color_discrete_sequence=['#00bcd4'])
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de telecomunicações não disponíveis.")
+
+    # ----- TAB 5: INDÍCIOS & NFe -----
+    with tab5:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### 🚨 Indícios Fiscais (NEAF)")
+            if 'qtd_total_indicios' in df.columns:
+                col_a, col_b, col_c = st.columns(3)
+
+                grupos_indicios = len(df[df['qtd_total_indicios'] > 0])
+                with col_a:
+                    st.metric("Grupos c/ Indícios", f"{grupos_indicios:,}", help=TOOLTIPS["grupos_com_indicios"])
+                with col_b:
+                    total_indicios = int(df['qtd_total_indicios'].sum())
+                    st.metric("Total Indícios", f"{total_indicios:,}", help=TOOLTIPS["total_indicios"])
+                with col_c:
+                    media_indicios = df['qtd_total_indicios'].mean()
+                    st.metric("Média/Grupo", f"{media_indicios:.1f}", help=TOOLTIPS["media_indicios_grupo"])
+
+                # Gráfico de distribuição
+                df_indicios = df[df['qtd_total_indicios'] > 0]
+                if not df_indicios.empty:
+                    fig = px.histogram(df_indicios, x='qtd_total_indicios', nbins=15,
+                                      title="Distribuição de Indícios",
+                                      template=filtros['tema'],
+                                      color_discrete_sequence=['#e53935'])
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de indícios fiscais não disponíveis.")
+
+        with col2:
+            st.markdown("##### ⚠️ Inconsistências NFe/NFCe")
+            if 'total' in df.columns:  # score de inconsistências
+                col_a, col_b, col_c = st.columns(3)
+
+                grupos_nfe = len(df[df['total'] > 0])
+                with col_a:
+                    st.metric("Grupos Analisados", f"{grupos_nfe:,}", help=TOOLTIPS["documentos_analisados"])
+                with col_b:
+                    media_incons = df['total'].mean()
+                    st.metric("Score Médio", f"{media_incons:.1f}", help=TOOLTIPS["score_inconsistencias"])
+                with col_c:
+                    alto_risco_nfe = len(df[df['total'] > 50])
+                    st.metric("Alto Risco", f"{alto_risco_nfe:,}")
+
+                # Gráfico de distribuição
+                df_nfe = df[df['total'] > 0]
+                if not df_nfe.empty:
+                    fig = px.histogram(df_nfe, x='total', nbins=20,
+                                      title="Distribuição Score Inconsistências",
+                                      template=filtros['tema'],
+                                      color_discrete_sequence=['#ff7043'])
+                    fig.update_layout(height=250, margin=dict(t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Dados de inconsistências NFe não disponíveis.")
+
+    # =========================================================================
+    # TOP GRUPOS CRÍTICOS
+    # =========================================================================
+    st.divider()
+    st.subheader("🔴 Top 15 Grupos Críticos")
+
     df_top = df.nlargest(15, score_col).copy()
-    
+
     if 'valor_max' in df_top.columns:
         df_top['Receita'] = df_top['valor_max'].apply(formatar_moeda)
-    
-    colunas = ['num_grupo', score_col, 'qntd_cnpj',
-               'Receita', 'qtd_total_indicios', 'nivel_risco_grupo_economico']
+
+    colunas = ['num_grupo', score_col, 'qntd_cnpj', 'Receita', 'qtd_total_indicios',
+               'nivel_risco_grupo_economico', 'nivel_risco_ccs']
     colunas_exist = [c for c in colunas if c in df_top.columns]
 
-    st.dataframe(df_top[colunas_exist], width='stretch', hide_index=True)
+    st.dataframe(df_top[colunas_exist], use_container_width=True, hide_index=True)
 
     # =========================================================================
     # IMPACTO FISCAL - GRUPOS DE ALTO RISCO
     # =========================================================================
     st.divider()
-    st.subheader("Impacto Fiscal - Grupos de Alto Risco")
+    st.subheader("💵 Impacto Fiscal - Grupos de Alto Risco")
 
-    st.info("""
-    Esta análise identifica grupos com **score alto** que potencialmente operam de forma fragmentada
-    para permanecer no Simples Nacional, evitando a tributação do Regime Normal.
-    """)
+    with st.expander("ℹ️ Sobre esta análise", expanded=False):
+        st.markdown("""
+        Esta análise identifica grupos com **score alto** que potencialmente operam de forma fragmentada
+        para permanecer no Simples Nacional, evitando a tributação do Regime Normal.
 
-    # Definir threshold para "alto risco"
+        **Metodologia:**
+        - Simples Nacional: Alíquota média de 10%
+        - Regime Normal: ICMS de 17% (SC)
+        - Diferença: 7% de tributo potencialmente não recolhido
+        """)
+
     col1, col2 = st.columns(2)
     with col1:
         score_threshold = st.slider(
-            "Score mínimo para considerar alto risco:",
-            min_value=10.0,
-            max_value=50.0,
-            value=20.0,
-            step=1.0,
+            "Score mínimo para alto risco:",
+            min_value=10.0, max_value=50.0, value=20.0, step=1.0,
             key="score_threshold_impacto"
         )
     with col2:
         receita_min = st.slider(
-            "Receita mínima (em milhões):",
-            min_value=1.0,
-            max_value=10.0,
-            value=4.8,
-            step=0.5,
+            "Receita mínima (milhões):",
+            min_value=1.0, max_value=10.0, value=4.8, step=0.5,
             key="receita_threshold_impacto"
         ) * 1e6
 
-    # Filtrar grupos de alto risco
     df_alto_risco = df[
         (df[score_col] >= score_threshold) &
         (df['valor_max'] >= receita_min)
@@ -6042,117 +6376,63 @@ def dashboard_executivo(dados, filtros):
     if df_alto_risco.empty:
         st.warning("Nenhum grupo encontrado com os critérios selecionados.")
     else:
-        # Métricas principais
-        col1, col2, col3, col4 = st.columns(4)
+        DIFERENCA_ALIQUOTA = 0.07
 
         qtd_grupos_risco = len(df_alto_risco)
-        qtd_cnpjs_risco = int(df_alto_risco['qntd_cnpj'].sum())
         soma_faturamento = df_alto_risco['valor_max'].sum()
 
-        # Cálculo do impacto fiscal estimado - APENAS PARA EMPRESAS DO SIMPLES
-        # Diferença entre Regime Normal e Simples Nacional (ICMS SC)
-        # Normal: 17% | Simples: ~10% => Diferença: 7%
-        DIFERENCA_ALIQUOTA = 0.07  # 7% de diferença
-
-        # Calcular faturamento apenas de empresas no Simples Nacional
         if 'qntd_sn' in df_alto_risco.columns and 'qntd_normal' in df_alto_risco.columns:
-            # Proporção de empresas no Simples por grupo
             total_cnpjs = df_alto_risco['qntd_sn'].fillna(0) + df_alto_risco['qntd_normal'].fillna(0)
             df_alto_risco['prop_simples'] = df_alto_risco['qntd_sn'].fillna(0) / total_cnpjs.replace(0, 1)
-            # Faturamento estimado do Simples = valor_max * proporção de empresas no Simples
             df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max'] * df_alto_risco['prop_simples']
             soma_faturamento_simples = df_alto_risco['faturamento_simples'].sum()
             qtd_cnpjs_simples = int(df_alto_risco['qntd_sn'].fillna(0).sum())
         else:
-            # Se não tiver a coluna, assume todo faturamento é do Simples
             soma_faturamento_simples = soma_faturamento
-            df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max']
-            qtd_cnpjs_simples = qtd_cnpjs_risco
+            qtd_cnpjs_simples = int(df_alto_risco['qntd_cnpj'].sum())
 
-        # Impacto calculado apenas sobre faturamento do Simples Nacional
         impacto_fiscal_estimado = soma_faturamento_simples * DIFERENCA_ALIQUOTA
 
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}", help="Quantidade de grupos econômicos que atendem aos critérios de score e receita definidos nos filtros acima.")
+            st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}")
         with col2:
-            st.metric("CNPJs no Simples", f"{qtd_cnpjs_simples:,}", help="Total de CNPJs enquadrados no Simples Nacional dentro dos grupos de alto risco identificados.")
+            st.metric("CNPJs no Simples", f"{qtd_cnpjs_simples:,}")
         with col3:
-            st.metric("Faturamento Simples", formatar_moeda(soma_faturamento_simples), help="Soma do faturamento das empresas no Simples Nacional dos grupos de alto risco.")
+            st.metric("Faturamento Simples", formatar_moeda(soma_faturamento_simples))
         with col4:
-            st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado), delta="potencial não arrecadado", help=TOOLTIPS["impacto_fiscal_estimado"])
+            st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado),
+                     delta="potencial não arrecadado", help=TOOLTIPS["impacto_fiscal_estimado"])
 
-        st.divider()
-
-        # Detalhamento do cálculo
-        st.write("**Metodologia do Cálculo de Impacto Fiscal:**")
-        st.markdown(f"""
-        - **Simples Nacional:** Alíquota média de **10%**
-        - **Regime Normal:** ICMS de **17%** (SC)
-        - **Diferença:** **7%** de tributo não recolhido
-        - **Fórmula:** Faturamento do Simples × 7% = Impacto Estimado
-
-        > **Nota:** O cálculo considera apenas o faturamento das empresas do Simples Nacional.
-        > Empresas já no Regime Normal não são consideradas no impacto.
-        """)
-
-        st.divider()
-
-        # Tabela detalhada dos grupos de alto risco
-        st.write("**Grupos Identificados:**")
-
-        df_display = df_alto_risco.copy()
-        df_display['Faturamento'] = df_display['valor_max'].apply(formatar_moeda)
-        df_display['Impacto_Estimado'] = (df_display['valor_max'] * DIFERENCA_ALIQUOTA).apply(formatar_moeda)
-        df_display['Acima_Limite_SN'] = df_display['valor_max'].apply(lambda x: 'SIM' if x > 4800000 else 'NÃO')
-
-        colunas_exibir = ['num_grupo', score_col, 'qntd_cnpj', 'Faturamento',
-                         'Impacto_Estimado', 'Acima_Limite_SN']
-        if 'nivel_risco_grupo_economico' in df_display.columns:
-            colunas_exibir.append('nivel_risco_grupo_economico')
-        if 'nivel_risco_ccs' in df_display.columns:
-            colunas_exibir.append('nivel_risco_ccs')
-
-        colunas_exibir = [c for c in colunas_exibir if c in df_display.columns]
-
-        st.dataframe(
-            df_display[colunas_exibir].sort_values(score_col, ascending=False),
-            width='stretch',
-            hide_index=True
-        )
-
-        # Gráfico de distribuição
+        # Gráficos
         col1, col2 = st.columns(2)
 
         with col1:
-            fig = px.histogram(
-                df_alto_risco,
-                x='valor_max',
-                nbins=20,
-                title="Distribuição de Faturamento - Grupos de Alto Risco",
-                template=filtros['tema'],
-                labels={'valor_max': 'Faturamento (R$)'}
-            )
+            fig = px.histogram(df_alto_risco, x='valor_max', nbins=20,
+                              title="Distribuição de Faturamento",
+                              template=filtros['tema'],
+                              color_discrete_sequence=['#1565C0'])
+            fig.update_layout(height=280, margin=dict(t=40, b=20))
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            # Top 10 por impacto
             df_top_impacto = df_alto_risco.nlargest(10, 'valor_max').copy()
             df_top_impacto['Impacto'] = df_top_impacto['valor_max'] * DIFERENCA_ALIQUOTA / 1e6
 
-            fig = px.bar(
-                df_top_impacto,
-                x='num_grupo',
-                y='Impacto',
-                title="Top 10 Grupos por Impacto Fiscal (em milhões)",
-                template=filtros['tema'],
-                labels={'Impacto': 'Impacto Fiscal (R$ milhões)', 'num_grupo': 'Grupo'}
-            )
+            fig = px.bar(df_top_impacto, x='num_grupo', y='Impacto',
+                        title="Top 10 Grupos por Impacto (R$ milhões)",
+                        template=filtros['tema'],
+                        color='Impacto',
+                        color_continuous_scale='Reds')
+            fig.update_layout(height=280, margin=dict(t=40, b=20), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
         # Download
-        csv = df_display[colunas_exibir].to_csv(index=False).encode('utf-8')
+        df_download = df_alto_risco[['num_grupo', score_col, 'qntd_cnpj', 'valor_max']].copy()
+        df_download['impacto_estimado'] = df_download['valor_max'] * DIFERENCA_ALIQUOTA
+        csv = df_download.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Download Grupos Alto Risco (CSV)",
+            label="📥 Download Grupos Alto Risco (CSV)",
             data=csv,
             file_name="grupos_alto_risco_impacto_fiscal.csv",
             mime="text/csv"
