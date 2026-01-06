@@ -1980,7 +1980,286 @@ def analise_machine_learning(engine, dados, filtros):
                 )
             except ImportError:
                 st.warning("⚠️ Biblioteca openpyxl não disponível. Use o download CSV.")
-    
+
+        # ================================================================
+        # SEÇÃO 7: IMPACTO FISCAL DOS GRUPOS ML
+        # ================================================================
+        st.header("7. Análise de Impacto Fiscal - Grupos ML")
+
+        st.info("""
+        **Análise de Impacto Fiscal aplicada aos resultados do Machine Learning**
+
+        Esta seção calcula o potencial de impacto fiscal dos grupos identificados pelo modelo de ML,
+        considerando a diferença tributária entre Simples Nacional e Regime Normal.
+        """)
+
+        # Filtro por nível de consenso
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            nivel_consenso_impacto = st.selectbox(
+                "Filtrar por Nível de Consenso:",
+                ["Todos os Grupos (1+ votos)", "Consenso Forte (3/3)", "Consenso Moderado (2/3)", "Consenso Fraco (1/3)"],
+                key="nivel_consenso_impacto_ml"
+            )
+
+        with col2:
+            score_min_impacto = st.slider(
+                "Score ML mínimo (%):",
+                min_value=0, max_value=100, value=50, step=5,
+                key="score_min_impacto_ml"
+            )
+
+        with col3:
+            aliquota_diff_ml = st.slider(
+                "Diferença de alíquota (%):",
+                min_value=5.0, max_value=12.0, value=7.0, step=0.5,
+                key="aliquota_diff_ml"
+            ) / 100
+
+        # Filtrar grupos conforme seleção
+        if nivel_consenso_impacto == "Consenso Forte (3/3)":
+            df_impacto_ml = df_grupos[df_grupos['votos_eh_grupo'] == 3].copy()
+        elif nivel_consenso_impacto == "Consenso Moderado (2/3)":
+            df_impacto_ml = df_grupos[df_grupos['votos_eh_grupo'] == 2].copy()
+        elif nivel_consenso_impacto == "Consenso Fraco (1/3)":
+            df_impacto_ml = df_grupos[df_grupos['votos_eh_grupo'] == 1].copy()
+        else:
+            df_impacto_ml = df_grupos[df_grupos['votos_eh_grupo'] >= 1].copy()
+
+        # Aplicar filtro de score
+        df_impacto_ml = df_impacto_ml[df_impacto_ml['score_ml_percentual'] >= score_min_impacto]
+
+        if df_impacto_ml.empty:
+            st.warning("⚠️ Nenhum grupo encontrado com os critérios selecionados.")
+        else:
+            # Calcular métricas de impacto
+            qtd_grupos_ml = len(df_impacto_ml)
+
+            # Usar receita_maxima do modelo ML
+            if 'receita_maxima' in df_impacto_ml.columns:
+                soma_faturamento_ml = df_impacto_ml['receita_maxima'].sum()
+            else:
+                soma_faturamento_ml = 0
+
+            total_cnpjs_ml = int(df_impacto_ml['qtd_cnpjs'].sum()) if 'qtd_cnpjs' in df_impacto_ml.columns else 0
+
+            # Estimar faturamento no Simples (80% como estimativa conservadora)
+            prop_simples_est = 0.80
+            soma_faturamento_simples_ml = soma_faturamento_ml * prop_simples_est
+            impacto_fiscal_ml = soma_faturamento_simples_ml * aliquota_diff_ml
+
+            # Métricas principais
+            st.subheader("📊 Resumo do Impacto Fiscal - Grupos ML")
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            with col1:
+                st.metric(
+                    "Grupos Identificados",
+                    f"{qtd_grupos_ml:,}",
+                    help="Grupos que atendem aos critérios de consenso e score"
+                )
+
+            with col2:
+                st.metric(
+                    "Total CNPJs",
+                    f"{total_cnpjs_ml:,}",
+                    help="Total de CNPJs nos grupos identificados"
+                )
+
+            with col3:
+                st.metric(
+                    "Faturamento Total",
+                    formatar_moeda(soma_faturamento_ml),
+                    help="Soma da receita máxima dos grupos"
+                )
+
+            with col4:
+                st.metric(
+                    "Faturamento Simples (est.)",
+                    formatar_moeda(soma_faturamento_simples_ml),
+                    help="Estimativa de faturamento no Simples Nacional (80%)"
+                )
+
+            with col5:
+                st.metric(
+                    "💰 IMPACTO FISCAL",
+                    formatar_moeda(impacto_fiscal_ml),
+                    delta="potencial não arrecadado",
+                    delta_color="inverse",
+                    help="Diferença tributária estimada"
+                )
+
+            st.divider()
+
+            # Impacto por nível de consenso
+            st.subheader("📈 Impacto Fiscal por Nível de Consenso")
+
+            # Calcular impacto por nível
+            impacto_por_nivel = []
+            for votos in [3, 2, 1]:
+                df_nivel = df_grupos[df_grupos['votos_eh_grupo'] == votos]
+                if not df_nivel.empty and 'receita_maxima' in df_nivel.columns:
+                    fat_nivel = df_nivel['receita_maxima'].sum() * prop_simples_est
+                    imp_nivel = fat_nivel * aliquota_diff_ml
+                    impacto_por_nivel.append({
+                        'Consenso': f'{votos}/3 votos',
+                        'Grupos': len(df_nivel),
+                        'Faturamento': fat_nivel,
+                        'Impacto': imp_nivel
+                    })
+
+            if impacto_por_nivel:
+                df_impacto_nivel = pd.DataFrame(impacto_por_nivel)
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    fig = px.bar(
+                        df_impacto_nivel,
+                        x='Consenso',
+                        y='Impacto',
+                        title="Impacto Fiscal por Nível de Consenso",
+                        template=filtros['tema'],
+                        color='Impacto',
+                        color_continuous_scale='Reds',
+                        text=df_impacto_nivel['Impacto'].apply(lambda x: formatar_moeda(x))
+                    )
+                    fig.update_traces(textposition='outside')
+                    fig.update_layout(height=350, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    fig = px.pie(
+                        df_impacto_nivel,
+                        values='Impacto',
+                        names='Consenso',
+                        title="Distribuição do Impacto por Consenso",
+                        template=filtros['tema'],
+                        color_discrete_sequence=['#B71C1C', '#E53935', '#EF5350']
+                    )
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    fig.update_layout(height=350)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            st.divider()
+
+            # Top 15 grupos por impacto
+            st.subheader("🏆 Top 15 Grupos por Impacto Fiscal (ML)")
+
+            df_impacto_ml['impacto_estimado'] = df_impacto_ml['receita_maxima'] * prop_simples_est * aliquota_diff_ml
+            df_top_impacto_ml = df_impacto_ml.nlargest(15, 'impacto_estimado')
+
+            col1, col2 = st.columns([2, 1])
+
+            with col1:
+                fig = px.bar(
+                    df_top_impacto_ml,
+                    x='num_grupo',
+                    y='impacto_estimado',
+                    title="Top 15 Grupos ML por Impacto Fiscal",
+                    template=filtros['tema'],
+                    color='votos_eh_grupo',
+                    color_continuous_scale='Reds',
+                    hover_data={
+                        'num_grupo': True,
+                        'score_ml_percentual': ':.1f',
+                        'votos_eh_grupo': True,
+                        'impacto_estimado': ':,.2f'
+                    },
+                    labels={
+                        'impacto_estimado': 'Impacto Fiscal (R$)',
+                        'votos_eh_grupo': 'Votos'
+                    }
+                )
+                fig.update_layout(height=400, xaxis_title="Número do Grupo")
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                impacto_top15 = df_top_impacto_ml['impacto_estimado'].sum()
+                st.markdown("**Resumo Top 15:**")
+                st.metric("Impacto Top 15", formatar_moeda(impacto_top15))
+                st.metric("% do Total", f"{(impacto_top15/impacto_fiscal_ml)*100:.1f}%" if impacto_fiscal_ml > 0 else "N/A")
+                st.metric("Score ML Médio", f"{df_top_impacto_ml['score_ml_percentual'].mean():.1f}%")
+                st.metric("Média Votos", f"{df_top_impacto_ml['votos_eh_grupo'].mean():.1f}/3")
+
+            st.divider()
+
+            # Correlação Score ML x Impacto
+            st.subheader("📉 Correlação Score ML x Impacto Fiscal")
+
+            fig = px.scatter(
+                df_impacto_ml,
+                x='score_ml_percentual',
+                y='impacto_estimado',
+                size='qtd_cnpjs',
+                color='votos_eh_grupo',
+                hover_name='num_grupo',
+                title="Score ML vs Impacto Fiscal",
+                template=filtros['tema'],
+                color_continuous_scale='RdYlGn_r',
+                labels={
+                    'score_ml_percentual': 'Score ML (%)',
+                    'impacto_estimado': 'Impacto Fiscal (R$)',
+                    'qtd_cnpjs': 'CNPJs',
+                    'votos_eh_grupo': 'Votos'
+                }
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Tabela detalhada com impacto
+            st.subheader("📋 Detalhamento dos Grupos com Impacto Fiscal")
+
+            colunas_impacto = ['num_grupo', 'score_ml_percentual', 'votos_eh_grupo',
+                              'consenso_classificacao', 'qtd_cnpjs', 'receita_maxima', 'impacto_estimado']
+            colunas_exist = [c for c in colunas_impacto if c in df_impacto_ml.columns]
+
+            df_display_impacto = df_impacto_ml[colunas_exist].sort_values('impacto_estimado', ascending=False).copy()
+            df_display_impacto['receita_maxima'] = df_display_impacto['receita_maxima'].apply(formatar_moeda)
+            df_display_impacto['impacto_estimado'] = df_display_impacto['impacto_estimado'].apply(formatar_moeda)
+            df_display_impacto = df_display_impacto.rename(columns={
+                'num_grupo': 'Grupo',
+                'score_ml_percentual': 'Score ML (%)',
+                'votos_eh_grupo': 'Votos',
+                'consenso_classificacao': 'Consenso',
+                'qtd_cnpjs': 'CNPJs',
+                'receita_maxima': 'Faturamento',
+                'impacto_estimado': 'Impacto Fiscal'
+            })
+
+            st.dataframe(df_display_impacto.head(100), use_container_width=True, hide_index=True)
+
+            # Download específico de impacto fiscal ML
+            st.subheader("📥 Exportar Análise de Impacto Fiscal")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                df_export_impacto = df_impacto_ml[['num_grupo', 'score_ml_percentual', 'votos_eh_grupo',
+                                                   'consenso_classificacao', 'qtd_cnpjs', 'receita_maxima',
+                                                   'impacto_estimado']].copy()
+                df_export_impacto = df_export_impacto.sort_values('impacto_estimado', ascending=False)
+
+                csv_impacto = df_export_impacto.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📄 Download Impacto Fiscal ML (CSV)",
+                    data=csv_impacto,
+                    file_name=f"impacto_fiscal_ml_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+
+            with col2:
+                # Top 50 prioritários
+                csv_top50 = df_export_impacto.head(50).to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="🎯 Top 50 Prioridade (CSV)",
+                    data=csv_top50,
+                    file_name=f"impacto_fiscal_ml_top50_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+
     elif 'cluster' in df_grupos.columns:
         # MODO INDIVIDUAL - RESULTADOS
         st.header("4. Resultados da Classificação")
