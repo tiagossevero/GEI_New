@@ -12000,6 +12000,8 @@ def main():
     # Inicializar página na sessão se não existir
     if 'pagina_atual' not in st.session_state:
         st.session_state.pagina_atual = "📊 Dashboard Executivo"
+    if 'menu_ativo' not in st.session_state:
+        st.session_state.menu_ativo = "principal"
 
     # Menu principal
     st.sidebar.markdown("### 📌 Menu Principal")
@@ -12016,41 +12018,70 @@ def main():
         "📈 Análises"
     ]
 
+    # Definir índice inicial baseado no menu ativo
+    idx_principal = 0
+    if st.session_state.menu_ativo == "principal" and st.session_state.pagina_atual in paginas_principais:
+        idx_principal = paginas_principais.index(st.session_state.pagina_atual)
+
     pag_principal = st.sidebar.radio(
-        "Navegação:",
+        "Navegação Principal:",
         paginas_principais,
+        index=idx_principal,
         key="menu_principal",
         label_visibility="collapsed"
     )
 
-    # Dimensões em expander
+    # Dimensões de Análise - mesmo formato do Menu Principal
     st.sidebar.markdown("---")
-    with st.sidebar.expander("📂 Dimensões de Análise", expanded=False):
-        dimensoes = [
-            "💳 Meios de Pagamento (DIMP)",
-            "👷 Funcionários (RAIS/CAGED)",
-            "📋 Convênio 115",
-            "🏦 Procuração Bancária (CCS)",
-            "💰 Financeiro (PGDAS/DIME)",
-            "⚡ Energia Elétrica (NF3e)",
-            "📱 Telecomunicações (NFCom)",
-            "⚠️ Inconsistências NFe/NFCe",
-            "🚨 Indícios Fiscais (NEAF)",
-            "🤝 Vínculos Societários (JUCESC)"
-        ]
+    st.sidebar.markdown("### 📂 Dimensões de Análise")
 
-        dimensao_selecionada = st.radio(
-            "Selecione a dimensão:",
-            ["Nenhuma"] + dimensoes,
-            key="menu_dimensoes",
-            label_visibility="collapsed"
-        )
+    dimensoes = [
+        "💳 Meios de Pagamento (DIMP)",
+        "👷 Funcionários (RAIS/CAGED)",
+        "📋 Convênio 115",
+        "🏦 Procuração Bancária (CCS)",
+        "💰 Financeiro (PGDAS/DIME)",
+        "⚡ Energia Elétrica (NF3e)",
+        "📱 Telecomunicações (NFCom)",
+        "⚠️ Inconsistências NFe/NFCe",
+        "🚨 Indícios Fiscais (NEAF)",
+        "🤝 Vínculos Societários (JUCESC)"
+    ]
 
-    # Determinar página atual
-    if dimensao_selecionada != "Nenhuma":
+    # Definir índice inicial baseado no menu ativo
+    idx_dimensao = None
+    if st.session_state.menu_ativo == "dimensao" and st.session_state.pagina_atual in dimensoes:
+        idx_dimensao = dimensoes.index(st.session_state.pagina_atual)
+
+    dimensao_selecionada = st.sidebar.radio(
+        "Navegação Dimensões:",
+        dimensoes,
+        index=idx_dimensao,
+        key="menu_dimensoes",
+        label_visibility="collapsed"
+    )
+
+    # Determinar página atual baseado na interação do usuário
+    # Verificar qual menu foi alterado
+    if pag_principal != st.session_state.get('ultimo_principal'):
+        # Menu principal foi alterado
+        st.session_state.menu_ativo = "principal"
+        st.session_state.pagina_atual = pag_principal
+        st.session_state.ultimo_principal = pag_principal
+        pag = pag_principal
+    elif dimensao_selecionada != st.session_state.get('ultima_dimensao'):
+        # Menu dimensões foi alterado
+        st.session_state.menu_ativo = "dimensao"
+        st.session_state.pagina_atual = dimensao_selecionada
+        st.session_state.ultima_dimensao = dimensao_selecionada
         pag = dimensao_selecionada
     else:
-        pag = pag_principal
+        # Nenhuma alteração, usar página atual
+        pag = st.session_state.pagina_atual
+
+    # Atualizar estados
+    st.session_state.ultimo_principal = pag_principal
+    st.session_state.ultima_dimensao = dimensao_selecionada
 
     st.sidebar.markdown("---")
 
