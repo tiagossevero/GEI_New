@@ -6337,106 +6337,481 @@ def dashboard_executivo(dados, filtros):
 
     st.dataframe(df_top[colunas_exist], use_container_width=True, hide_index=True)
 
-    # =========================================================================
-    # IMPACTO FISCAL - GRUPOS DE ALTO RISCO
-    # =========================================================================
-    st.divider()
-    st.subheader("💵 Impacto Fiscal - Grupos de Alto Risco")
 
-    with st.expander("ℹ️ Sobre esta análise", expanded=False):
+def menu_impacto_fiscal(dados, filtros):
+    """
+    Análise completa de Impacto Fiscal - Grupos de Alto Risco
+    Identifica grupos que potencialmente fragmentam operações para permanecer no Simples Nacional
+    """
+    st.markdown("<h1 class='main-header'>💵 Análise de Impacto Fiscal</h1>", unsafe_allow_html=True)
+
+    df = aplicar_filtros(dados['percent'], filtros)
+
+    if df.empty:
+        st.warning("Nenhum dado encontrado com os filtros aplicados.")
+        return
+
+    score_col = 'score_final_ccs' if 'score_final_ccs' in df.columns else 'score_final_avancado'
+
+    # Explicação da análise
+    with st.expander("ℹ️ Sobre esta Análise de Impacto Fiscal", expanded=False):
         st.markdown("""
-        Esta análise identifica grupos com **score alto** que potencialmente operam de forma fragmentada
+        ### Metodologia de Cálculo
+
+        Esta análise identifica grupos econômicos com **score alto** que potencialmente operam de forma fragmentada
         para permanecer no Simples Nacional, evitando a tributação do Regime Normal.
 
-        **Metodologia:**
-        - Simples Nacional: Alíquota média de 10%
-        - Regime Normal: ICMS de 17% (SC)
-        - Diferença: 7% de tributo potencialmente não recolhido
+        **Premissas Fiscais:**
+        - **Simples Nacional:** Alíquota média efetiva de ~10%
+        - **Regime Normal:** ICMS de 17% (Santa Catarina)
+        - **Diferença Tributária:** 7% de tributo potencialmente não recolhido
+
+        **Critérios de Risco:**
+        - Grupos com score elevado indicam práticas atípicas
+        - Faturamento significativo fragmentado entre múltiplos CNPJs
+        - Alta proporção de empresas no Simples Nacional dentro do grupo
+
+        **Aplicação:**
+        - Priorização de fiscalizações
+        - Estimativa de potencial arrecadatório
+        - Identificação de contribuintes para ações de conformidade
         """)
 
-    col1, col2 = st.columns(2)
+    # ==========================================================================
+    # PARÂMETROS DE ANÁLISE
+    # ==========================================================================
+    st.subheader("🎯 Parâmetros de Análise")
+
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         score_threshold = st.slider(
             "Score mínimo para alto risco:",
-            min_value=10.0, max_value=50.0, value=20.0, step=1.0,
-            key="score_threshold_impacto"
+            min_value=5.0, max_value=50.0, value=20.0, step=1.0,
+            key="score_threshold_impacto_menu",
+            help="Grupos com score acima deste valor serão considerados de alto risco"
         )
     with col2:
         receita_min = st.slider(
-            "Receita mínima (milhões):",
-            min_value=1.0, max_value=10.0, value=4.8, step=0.5,
-            key="receita_threshold_impacto"
+            "Receita mínima (milhões R$):",
+            min_value=0.5, max_value=20.0, value=4.8, step=0.5,
+            key="receita_threshold_impacto_menu"
         ) * 1e6
+    with col3:
+        min_cnpjs = st.slider(
+            "Mínimo de CNPJs no grupo:",
+            min_value=2, max_value=20, value=3, step=1,
+            key="min_cnpjs_impacto"
+        )
+    with col4:
+        aliquota_diferenca = st.slider(
+            "Diferença de alíquota (%):",
+            min_value=5.0, max_value=12.0, value=7.0, step=0.5,
+            key="aliquota_diferenca"
+        ) / 100
 
+    # ==========================================================================
+    # FILTRAR GRUPOS DE ALTO RISCO
+    # ==========================================================================
     df_alto_risco = df[
         (df[score_col] >= score_threshold) &
-        (df['valor_max'] >= receita_min)
+        (df['valor_max'] >= receita_min) &
+        (df['qntd_cnpj'] >= min_cnpjs)
     ].copy()
 
     if df_alto_risco.empty:
-        st.warning("Nenhum grupo encontrado com os critérios selecionados.")
+        st.warning("⚠️ Nenhum grupo encontrado com os critérios selecionados. Ajuste os parâmetros acima.")
+        return
+
+    # Calcular métricas
+    qtd_grupos_risco = len(df_alto_risco)
+    soma_faturamento = df_alto_risco['valor_max'].sum()
+    total_cnpjs_risco = int(df_alto_risco['qntd_cnpj'].sum())
+
+    # Calcular proporção no Simples Nacional
+    if 'qntd_sn' in df_alto_risco.columns and 'qntd_normal' in df_alto_risco.columns:
+        total_cnpjs_calc = df_alto_risco['qntd_sn'].fillna(0) + df_alto_risco['qntd_normal'].fillna(0)
+        df_alto_risco['prop_simples'] = df_alto_risco['qntd_sn'].fillna(0) / total_cnpjs_calc.replace(0, 1)
+        df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max'] * df_alto_risco['prop_simples']
+        soma_faturamento_simples = df_alto_risco['faturamento_simples'].sum()
+        qtd_cnpjs_simples = int(df_alto_risco['qntd_sn'].fillna(0).sum())
+        qtd_cnpjs_normal = int(df_alto_risco['qntd_normal'].fillna(0).sum())
     else:
-        DIFERENCA_ALIQUOTA = 0.07
+        soma_faturamento_simples = soma_faturamento * 0.8  # estimativa conservadora
+        qtd_cnpjs_simples = int(total_cnpjs_risco * 0.8)
+        qtd_cnpjs_normal = int(total_cnpjs_risco * 0.2)
+        df_alto_risco['prop_simples'] = 0.8
+        df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max'] * 0.8
 
-        qtd_grupos_risco = len(df_alto_risco)
-        soma_faturamento = df_alto_risco['valor_max'].sum()
+    impacto_fiscal_estimado = soma_faturamento_simples * aliquota_diferenca
 
-        if 'qntd_sn' in df_alto_risco.columns and 'qntd_normal' in df_alto_risco.columns:
-            total_cnpjs = df_alto_risco['qntd_sn'].fillna(0) + df_alto_risco['qntd_normal'].fillna(0)
-            df_alto_risco['prop_simples'] = df_alto_risco['qntd_sn'].fillna(0) / total_cnpjs.replace(0, 1)
-            df_alto_risco['faturamento_simples'] = df_alto_risco['valor_max'] * df_alto_risco['prop_simples']
-            soma_faturamento_simples = df_alto_risco['faturamento_simples'].sum()
-            qtd_cnpjs_simples = int(df_alto_risco['qntd_sn'].fillna(0).sum())
-        else:
-            soma_faturamento_simples = soma_faturamento
-            qtd_cnpjs_simples = int(df_alto_risco['qntd_cnpj'].sum())
+    # ==========================================================================
+    # MÉTRICAS PRINCIPAIS
+    # ==========================================================================
+    st.subheader("📊 Resumo do Impacto Fiscal")
 
-        impacto_fiscal_estimado = soma_faturamento_simples * DIFERENCA_ALIQUOTA
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric(
+            "Grupos de Alto Risco",
+            f"{qtd_grupos_risco:,}",
+            help="Número de grupos econômicos que atendem aos critérios de risco"
+        )
+    with col2:
+        st.metric(
+            "CNPJs no Simples",
+            f"{qtd_cnpjs_simples:,}",
+            delta=f"de {total_cnpjs_risco:,} total",
+            help="Empresas optantes pelo Simples Nacional nos grupos de risco"
+        )
+    with col3:
+        st.metric(
+            "Faturamento Total",
+            formatar_moeda(soma_faturamento),
+            help="Soma do faturamento máximo dos grupos identificados"
+        )
+    with col4:
+        st.metric(
+            "Faturamento no Simples",
+            formatar_moeda(soma_faturamento_simples),
+            help="Faturamento estimado das empresas no Simples Nacional"
+        )
+    with col5:
+        st.metric(
+            "💰 IMPACTO FISCAL ESTIMADO",
+            formatar_moeda(impacto_fiscal_estimado),
+            delta="potencial não arrecadado",
+            delta_color="inverse",
+            help=TOOLTIPS.get("impacto_fiscal_estimado", "Diferença tributária estimada entre Simples e Regime Normal")
+        )
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Grupos de Alto Risco", f"{qtd_grupos_risco:,}")
-        with col2:
-            st.metric("CNPJs no Simples", f"{qtd_cnpjs_simples:,}")
-        with col3:
-            st.metric("Faturamento Simples", formatar_moeda(soma_faturamento_simples))
-        with col4:
-            st.metric("Impacto Fiscal Estimado", formatar_moeda(impacto_fiscal_estimado),
-                     delta="potencial não arrecadado", help=TOOLTIPS["impacto_fiscal_estimado"])
+    st.divider()
 
-        # Gráficos
+    # ==========================================================================
+    # ANÁLISE POR FAIXAS DE IMPACTO
+    # ==========================================================================
+    st.subheader("📈 Análise por Faixas de Impacto")
+
+    # Calcular impacto individual
+    df_alto_risco['impacto_individual'] = df_alto_risco['faturamento_simples'] * aliquota_diferenca
+
+    # Criar faixas de impacto
+    bins = [0, 100000, 500000, 1000000, 5000000, float('inf')]
+    labels = ['Até R$ 100mil', 'R$ 100mil - 500mil', 'R$ 500mil - 1mi', 'R$ 1mi - 5mi', 'Acima de R$ 5mi']
+    df_alto_risco['faixa_impacto'] = pd.cut(df_alto_risco['impacto_individual'], bins=bins, labels=labels)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Contagem por faixa
+        faixa_count = df_alto_risco['faixa_impacto'].value_counts().sort_index()
+        fig = px.bar(
+            x=faixa_count.index.astype(str),
+            y=faixa_count.values,
+            title="Quantidade de Grupos por Faixa de Impacto",
+            template=filtros['tema'],
+            color=faixa_count.values,
+            color_continuous_scale='Reds'
+        )
+        fig.update_layout(
+            height=350,
+            xaxis_title="Faixa de Impacto",
+            yaxis_title="Quantidade de Grupos",
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        # Valor por faixa
+        faixa_valor = df_alto_risco.groupby('faixa_impacto')['impacto_individual'].sum() / 1e6
+        fig = px.pie(
+            values=faixa_valor.values,
+            names=faixa_valor.index.astype(str),
+            title="Impacto Fiscal por Faixa (R$ milhões)",
+            template=filtros['tema'],
+            color_discrete_sequence=px.colors.sequential.Reds_r
+        )
+        fig.update_layout(height=350)
+        fig.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ==========================================================================
+    # TOP GRUPOS POR IMPACTO FISCAL
+    # ==========================================================================
+    st.subheader("🏆 Top 20 Grupos por Impacto Fiscal")
+
+    df_top_impacto = df_alto_risco.nlargest(20, 'impacto_individual').copy()
+    df_top_impacto['Impacto_Milhoes'] = df_top_impacto['impacto_individual'] / 1e6
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        fig = px.bar(
+            df_top_impacto,
+            x='num_grupo',
+            y='Impacto_Milhoes',
+            title="Impacto Fiscal Estimado por Grupo (R$ milhões)",
+            template=filtros['tema'],
+            color='Impacto_Milhoes',
+            color_continuous_scale='Reds',
+            hover_data={
+                'num_grupo': True,
+                'Impacto_Milhoes': ':.2f',
+                score_col: ':.2f',
+                'qntd_cnpj': True
+            }
+        )
+        fig.update_layout(
+            height=400,
+            xaxis_title="Número do Grupo",
+            yaxis_title="Impacto Fiscal (R$ milhões)",
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        # Resumo do Top 20
+        st.markdown("**Resumo Top 20:**")
+        impacto_top20 = df_top_impacto['impacto_individual'].sum()
+        st.metric("Impacto Top 20", formatar_moeda(impacto_top20))
+        st.metric("% do Total", f"{(impacto_top20/impacto_fiscal_estimado)*100:.1f}%")
+        st.metric("Média por Grupo", formatar_moeda(impacto_top20/20))
+
+    st.divider()
+
+    # ==========================================================================
+    # ANÁLISE POR GERFE
+    # ==========================================================================
+    if 'nm_gerfe' in df_alto_risco.columns:
+        st.subheader("🗺️ Impacto Fiscal por GERFE")
+
+        gerfe_analysis = df_alto_risco.groupby('nm_gerfe').agg({
+            'num_grupo': 'count',
+            'qntd_cnpj': 'sum',
+            'valor_max': 'sum',
+            'impacto_individual': 'sum'
+        }).rename(columns={
+            'num_grupo': 'Grupos',
+            'qntd_cnpj': 'CNPJs',
+            'valor_max': 'Faturamento',
+            'impacto_individual': 'Impacto'
+        }).sort_values('Impacto', ascending=False)
+
         col1, col2 = st.columns(2)
 
         with col1:
-            fig = px.histogram(df_alto_risco, x='valor_max', nbins=20,
-                              title="Distribuição de Faturamento",
-                              template=filtros['tema'],
-                              color_discrete_sequence=['#1565C0'])
-            fig.update_layout(height=280, margin=dict(t=40, b=20))
+            fig = px.bar(
+                gerfe_analysis.head(10).reset_index(),
+                x='Impacto',
+                y='nm_gerfe',
+                orientation='h',
+                title="Top 10 GERFEs por Impacto Fiscal",
+                template=filtros['tema'],
+                color='Impacto',
+                color_continuous_scale='Reds'
+            )
+            fig.update_layout(height=400, yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            df_top_impacto = df_alto_risco.nlargest(10, 'valor_max').copy()
-            df_top_impacto['Impacto'] = df_top_impacto['valor_max'] * DIFERENCA_ALIQUOTA / 1e6
-
-            fig = px.bar(df_top_impacto, x='num_grupo', y='Impacto',
-                        title="Top 10 Grupos por Impacto (R$ milhões)",
-                        template=filtros['tema'],
-                        color='Impacto',
-                        color_continuous_scale='Reds')
-            fig.update_layout(height=280, margin=dict(t=40, b=20), showlegend=False)
+            fig = px.treemap(
+                gerfe_analysis.reset_index(),
+                path=['nm_gerfe'],
+                values='Impacto',
+                title="Distribuição do Impacto por GERFE",
+                template=filtros['tema'],
+                color='Impacto',
+                color_continuous_scale='Reds'
+            )
+            fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
-        # Download
-        df_download = df_alto_risco[['num_grupo', score_col, 'qntd_cnpj', 'valor_max']].copy()
-        df_download['impacto_estimado'] = df_download['valor_max'] * DIFERENCA_ALIQUOTA
-        csv = df_download.to_csv(index=False).encode('utf-8')
+    st.divider()
+
+    # ==========================================================================
+    # CORRELAÇÃO SCORE x IMPACTO
+    # ==========================================================================
+    st.subheader("📉 Correlação Score x Impacto Fiscal")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        fig = px.scatter(
+            df_alto_risco,
+            x=score_col,
+            y='impacto_individual',
+            size='qntd_cnpj',
+            color='prop_simples',
+            hover_name='num_grupo',
+            title="Score vs Impacto Fiscal",
+            template=filtros['tema'],
+            color_continuous_scale='RdYlGn_r',
+            labels={
+                score_col: 'Score de Risco',
+                'impacto_individual': 'Impacto Fiscal (R$)',
+                'qntd_cnpj': 'CNPJs',
+                'prop_simples': '% Simples'
+            }
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        # Distribuição do impacto
+        fig = px.histogram(
+            df_alto_risco,
+            x='impacto_individual',
+            nbins=30,
+            title="Distribuição do Impacto Fiscal por Grupo",
+            template=filtros['tema'],
+            color_discrete_sequence=['#B71C1C']
+        )
+        fig.update_layout(
+            height=400,
+            xaxis_title="Impacto Fiscal (R$)",
+            yaxis_title="Quantidade de Grupos"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # ==========================================================================
+    # SIMULADOR DE CENÁRIOS
+    # ==========================================================================
+    st.subheader("🧮 Simulador de Cenários")
+
+    with st.expander("Simular diferentes cenários de fiscalização", expanded=False):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            taxa_sucesso = st.slider(
+                "Taxa de sucesso esperada (%)",
+                min_value=10, max_value=100, value=50, step=5,
+                help="Percentual de grupos que efetivamente serão autuados"
+            ) / 100
+
+        with col2:
+            percentual_grupos = st.slider(
+                "Grupos a fiscalizar (%)",
+                min_value=10, max_value=100, value=30, step=5,
+                help="Percentual dos grupos identificados que serão fiscalizados"
+            ) / 100
+
+        with col3:
+            multa_adicional = st.slider(
+                "Multa adicional (%)",
+                min_value=0, max_value=100, value=20, step=5,
+                help="Percentual de multa sobre o imposto devido"
+            ) / 100
+
+        # Calcular cenário
+        grupos_fiscalizar = int(qtd_grupos_risco * percentual_grupos)
+        df_cenario = df_alto_risco.nlargest(grupos_fiscalizar, 'impacto_individual')
+        impacto_cenario = df_cenario['impacto_individual'].sum()
+        recuperacao_esperada = impacto_cenario * taxa_sucesso
+        com_multa = recuperacao_esperada * (1 + multa_adicional)
+
+        st.markdown("---")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Grupos a Fiscalizar", f"{grupos_fiscalizar:,}")
+        with col2:
+            st.metric("Impacto Potencial", formatar_moeda(impacto_cenario))
+        with col3:
+            st.metric("Recuperação Esperada", formatar_moeda(recuperacao_esperada))
+        with col4:
+            st.metric("Com Multas", formatar_moeda(com_multa), delta=f"+{multa_adicional*100:.0f}%")
+
+    st.divider()
+
+    # ==========================================================================
+    # TABELA DETALHADA
+    # ==========================================================================
+    st.subheader("📋 Detalhamento dos Grupos de Alto Risco")
+
+    # Preparar dados para exibição
+    colunas_exibir = ['num_grupo', score_col, 'qntd_cnpj', 'valor_max', 'impacto_individual']
+    if 'qntd_sn' in df_alto_risco.columns:
+        colunas_exibir.insert(3, 'qntd_sn')
+    if 'nm_gerfe' in df_alto_risco.columns:
+        colunas_exibir.insert(1, 'nm_gerfe')
+    if 'nivel_risco_grupo_economico' in df_alto_risco.columns:
+        colunas_exibir.append('nivel_risco_grupo_economico')
+
+    df_exibir = df_alto_risco[colunas_exibir].copy()
+    df_exibir = df_exibir.sort_values('impacto_individual', ascending=False)
+
+    # Renomear colunas para exibição
+    rename_map = {
+        'num_grupo': 'Grupo',
+        'nm_gerfe': 'GERFE',
+        score_col: 'Score',
+        'qntd_cnpj': 'CNPJs',
+        'qntd_sn': 'Simples',
+        'valor_max': 'Faturamento',
+        'impacto_individual': 'Impacto Fiscal',
+        'nivel_risco_grupo_economico': 'Nível Risco'
+    }
+    df_exibir = df_exibir.rename(columns=rename_map)
+
+    # Formatar valores monetários
+    if 'Faturamento' in df_exibir.columns:
+        df_exibir['Faturamento'] = df_exibir['Faturamento'].apply(formatar_moeda)
+    df_exibir['Impacto Fiscal'] = df_exibir['Impacto Fiscal'].apply(formatar_moeda)
+
+    st.dataframe(df_exibir, use_container_width=True, hide_index=True, height=500)
+
+    # ==========================================================================
+    # DOWNLOADS
+    # ==========================================================================
+    st.subheader("📥 Exportar Dados")
+
+    col1, col2, col3 = st.columns(3)
+
+    # Preparar dados para download
+    df_download = df_alto_risco[['num_grupo', score_col, 'qntd_cnpj', 'valor_max',
+                                  'faturamento_simples', 'impacto_individual', 'prop_simples']].copy()
+    if 'nm_gerfe' in df_alto_risco.columns:
+        df_download['nm_gerfe'] = df_alto_risco['nm_gerfe']
+    if 'qntd_sn' in df_alto_risco.columns:
+        df_download['qntd_sn'] = df_alto_risco['qntd_sn']
+    if 'qntd_normal' in df_alto_risco.columns:
+        df_download['qntd_normal'] = df_alto_risco['qntd_normal']
+
+    df_download = df_download.sort_values('impacto_individual', ascending=False)
+
+    with col1:
+        csv = df_download.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 Download Grupos Alto Risco (CSV)",
+            label="📄 Download CSV Completo",
             data=csv,
-            file_name="grupos_alto_risco_impacto_fiscal.csv",
+            file_name="impacto_fiscal_grupos_alto_risco.csv",
             mime="text/csv"
         )
+
+    with col2:
+        # Top 50 para ação imediata
+        csv_top50 = df_download.head(50).to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="🎯 Top 50 Grupos (CSV)",
+            data=csv_top50,
+            file_name="impacto_fiscal_top50_prioridade.csv",
+            mime="text/csv"
+        )
+
+    with col3:
+        # Resumo por GERFE
+        if 'nm_gerfe' in df_alto_risco.columns:
+            csv_gerfe = gerfe_analysis.reset_index().to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="🗺️ Resumo por GERFE (CSV)",
+                data=csv_gerfe,
+                file_name="impacto_fiscal_por_gerfe.csv",
+                mime="text/csv"
+            )
+
 
 def ranking_grupos(dados, filtros):
     """Página de ranking de grupos"""
@@ -11353,6 +11728,7 @@ def main():
     paginas_principais = [
         "📊 Dashboard Executivo",
         "🏆 Ranking",
+        "💵 Impacto Fiscal",
         "👤 Contadores",
         "📁 Dossiê do Grupo",
         "🔍 Análise Pontual",
@@ -11424,6 +11800,8 @@ def main():
         dashboard_executivo(dados, filtros)
     elif pag == "🏆 Ranking":
         ranking_grupos(dados, filtros)
+    elif pag == "💵 Impacto Fiscal":
+        menu_impacto_fiscal(dados, filtros)
     elif pag == "🔍 Análise Pontual":
         analise_pontual(engine, dados, filtros)
     elif pag == "👤 Contadores":
